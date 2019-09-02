@@ -68,6 +68,74 @@ struct HConn                            /* http connection */
 
 static struct Server server;            /* global server informations */
 
+static void     bufinit(Buffer *);
+static int      bufputs(Buffer *, const char *s);
+static int      bufputc(Buffer *, int c);
+static int      bufreserve(Buffer *, size_t n);
+static void     bufclear(Buffer *);
+static void     buftruncate(Buffer *, size_t newlen);
+static void     bufdeinit(Buffer *);
+
+static void bufinit(Buffer *buf)
+{
+        buf->cap  = 0;
+        buf->len  = 0;
+        buf->data = NULL;
+}
+
+static int bufputs(Buffer *buf, const char *s)
+{
+        while (*s)
+                if (bufputc(buf, *s++) == EOF)
+                        return EOF;
+
+        return 1;
+}
+
+static int bufputc(Buffer *buf, int c)
+{
+        if (buf->len == buf->cap && bufreserve(buf, 1) == EOF)
+                return EOF;
+
+        return buf->data[buf->len++] = (unsigned char)c;
+}
+
+static int bufreserve(Buffer *buf, size_t n)
+{
+        size_t available, newcap;
+        unsigned char *p;
+
+        available = buf->cap - buf->len;
+        if (available >= n)
+                return 1;
+
+        newcap = buf->cap + MAX(BUFCHUNK, (n - available));
+
+        p = realloc(buf->data, newcap);
+        if ( ! p)
+                return EOF;
+
+        buf->cap = newcap;
+        buf->data = p;
+        return 1;
+}
+
+static void bufclear(Buffer *buf)
+{
+        buftruncate(buf, 0);
+}
+
+static void buftruncate(Buffer *buf, size_t newlen)
+{
+        if (buf->len > newlen)
+                buf->len = newlen;
+}
+
+static void bufdeinit(Buffer *buf)
+{
+        free(buf->data);
+}
+
 int main(int argc, char **argv)
 {
         (void)server;
