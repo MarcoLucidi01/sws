@@ -1,5 +1,6 @@
 /* See LICENSE file for copyright and license details. */
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <getopt.h>
 #include <netdb.h>
@@ -60,8 +61,6 @@ struct Server                           /* server informations */
 {
         int             sock;           /* server listening socket */
         int             running;        /* 1 if running, 0 if stopped */
-        char            address[128];   /* printable server address (ipv4 or ipv6) */
-        char            port[6];        /* printable server port (real port, not 0) */
         char           *rootpath;       /* current working directory absolute path */
         const char     *index;          /* index filename for directories requests */
 };
@@ -109,11 +108,12 @@ static void     bufclear(Buffer *);
 static void     buftruncate(Buffer *, size_t newlen);
 static void     bufdeinit(Buffer *);
 static void     parseargs(Args *, int argc, char **argv);
-static void     srvinit(Args *);
+static void     initsrv(Args *);
 static void     setupsock(Args *);
 static void     setuprootpath(Args *);
 static void     setupsighandler(void);
 static void     sighandler(int);
+static void     logsrvinfo(void);
 static void     logerr(const char *fmt, ...);
 static void     vlogerr(const char *fmt, va_list ap);
 static void     cleanup(void);
@@ -207,7 +207,7 @@ static void parseargs(Args *args, int argc, char **argv)
         }
 }
 
-static void srvinit(Args *args)
+static void initsrv(Args *args)
 {
         setupsock(args);
         setuprootpath(args);
@@ -302,6 +302,31 @@ static void sighandler(int sig)
         }
 }
 
+static void logsrvinfo(void)
+{
+        struct sockaddr_storage sa;
+        socklen_t               salen = sizeof(sa);
+        char                    address[INET6_ADDRSTRLEN];
+        char                    port[6];
+
+        memset(&sa, 0, salen);
+        if (getsockname(server.sock, (struct sockaddr *)&sa, &salen) == -1)
+                die("getsockname: %s", strerror(errno));
+
+        if (sa.ss_family == AF_INET) {
+                inet_ntop(AF_INET, &(((struct sockaddr_in *)&sa)->sin_addr), address, INET_ADDRSTRLEN);
+                sprintf(port, "%u", ntohs(((struct sockaddr_in *)&sa)->sin_port));
+
+        } else if (sa.ss_family == AF_INET6) {
+                inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)&sa)->sin6_addr), address, INET6_ADDRSTRLEN);
+                sprintf(port, "%u", ntohs(((struct sockaddr_in6 *)&sa)->sin6_port));
+
+        } else
+                die("logsrvinfo: unknown sa_family");
+
+        printf("serving %s at %s:%s pid is %d\n", server.rootpath, address, port, getpid());
+}
+
 static void cleanup(void)
 {
         close(server.sock);
@@ -348,7 +373,8 @@ int main(int argc, char **argv)
         if (args.version)
                 die(VERSION);
 
-        srvinit(&args);
+        initsrv(&args);
+        logsrvinfo();
         cleanup();
 
         return 0;
