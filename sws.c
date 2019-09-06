@@ -1,5 +1,6 @@
 /* See LICENSE file for copyright and license details. */
 
+#include <errno.h>
 #include <getopt.h>
 #include <netdb.h>
 #include <stdarg.h>
@@ -108,6 +109,7 @@ static void     bufdeinit(Buffer *);
 static void     parseargs(Args *, int argc, char **argv);
 static void     srvinit(Args *);
 static void     setupsock(Args *);
+static void     setuprootpath(Args *);
 static void     logerr(const char *fmt, ...);
 static void     vlogerr(const char *fmt, va_list ap);
 static void     cleanup(void);
@@ -204,6 +206,7 @@ static void parseargs(Args *args, int argc, char **argv)
 static void srvinit(Args *args)
 {
         setupsock(args);
+        setuprootpath(args);
         server.index = args->index ? args->index : DEFAULTINDEX;
 }
 
@@ -247,9 +250,30 @@ static void setupsock(Args *args)
                 die("failed to bind socket");
 }
 
+static void setuprootpath(Args *args)
+{
+        Buffer buf;
+
+        if (args->rootpath && chdir(args->rootpath) != 0)
+                die("chdir: %s", strerror(errno));
+
+        bufinit(&buf);
+        for (;;) {
+                if (bufreserve(&buf, BUFCHUNK) == EOF)
+                        die("buf_reserve: %s", strerror(errno));
+
+                server.rootpath = (char *)buf.data;
+                if (getcwd(server.rootpath, buf.cap))
+                        break;
+                if (errno != ERANGE)
+                        die("getcwd: %s", strerror(errno));
+        }
+}
+
 static void cleanup(void)
 {
         close(server.sock);
+        free(server.rootpath);
 }
 
 static void logerr(const char *fmt, ...)
