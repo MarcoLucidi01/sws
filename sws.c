@@ -3,12 +3,14 @@
 #include <errno.h>
 #include <getopt.h>
 #include <netdb.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -110,6 +112,8 @@ static void     parseargs(Args *, int argc, char **argv);
 static void     srvinit(Args *);
 static void     setupsock(Args *);
 static void     setuprootpath(Args *);
+static void     setupsighandler(void);
+static void     sighandler(int);
 static void     logerr(const char *fmt, ...);
 static void     vlogerr(const char *fmt, va_list ap);
 static void     cleanup(void);
@@ -207,6 +211,7 @@ static void srvinit(Args *args)
 {
         setupsock(args);
         setuprootpath(args);
+        setupsighandler();
         server.index = args->index ? args->index : DEFAULTINDEX;
 }
 
@@ -267,6 +272,33 @@ static void setuprootpath(Args *args)
                         break;
                 if (errno != ERANGE)
                         die("getcwd: %s", strerror(errno));
+        }
+}
+
+static void setupsighandler(void)
+{
+        struct sigaction sa;
+
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = sighandler;
+
+        if (sigaction(SIGINT,  &sa, NULL) == -1
+        ||  sigaction(SIGTERM, &sa, NULL) == -1
+        ||  sigaction(SIGCHLD, &sa, NULL) == -1)
+                die("sigaction: %s", strerror(errno));
+}
+
+static void sighandler(int sig)
+{
+        switch (sig) {
+        case SIGINT:
+        case SIGTERM:
+                server.running = 0;
+                break;
+        case SIGCHLD:
+                while (waitpid(-1, NULL, WNOHANG) > 0)
+                        ;
+                break;
         }
 }
 
