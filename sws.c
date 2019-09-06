@@ -1,11 +1,15 @@
 /* See LICENSE file for copyright and license details. */
 
 #include <getopt.h>
+#include <netdb.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <time.h>
+#include <unistd.h>
 
 #define HELP            "usage: sws -aprihv\n\n" \
                         "Simple Small Static Stupid Whatever Web Server.\n\n" \
@@ -17,6 +21,8 @@
                         "  -v  version"
 
 #define VERSION         "0.6.0"
+#define DEFAULTPORT     "8080"
+#define DEFAULTBACKLOG  10
 #define DEFAULTINDEX    "index.html"
 
 #define BUFCHUNK        256             /* minimum buffer capacity increment */
@@ -101,6 +107,7 @@ static void     buftruncate(Buffer *, size_t newlen);
 static void     bufdeinit(Buffer *);
 static void     parseargs(Args *, int argc, char **argv);
 static void     srvinit(Args *);
+static void     setupsock(Args *);
 static void     logerr(const char *fmt, ...);
 static void     vlogerr(const char *fmt, va_list ap);
 static void     cleanup(void);
@@ -196,12 +203,53 @@ static void parseargs(Args *args, int argc, char **argv)
 
 static void srvinit(Args *args)
 {
+        setupsock(args);
         server.index = args->index ? args->index : DEFAULTINDEX;
+}
+
+static void setupsock(Args *args)
+{
+        struct addrinfo hints, *info, *p;
+        int err, yes = 1;
+
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family   = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_flags    = AI_PASSIVE;
+
+        err = getaddrinfo(args->address, args->port ? args->port : DEFAULTPORT, &hints, &info);
+        if (err)
+                die("getaddrinfo: %s", gai_strerror(err));
+
+        for (p = info; p; p = p->ai_next) {
+                server.sock = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+                if (server.sock == -1)
+                        continue;
+
+                if (setsockopt(server.sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) == -1) {
+                        close(server.sock);
+                        continue;
+                }
+                if (bind(server.sock, p->ai_addr, p->ai_addrlen) == -1) {
+                        close(server.sock);
+                        continue;
+                }
+                if (listen(server.sock, DEFAULTBACKLOG) == -1) {
+                        close(server.sock);
+                        continue;
+                }
+                break;
+        }
+
+        freeaddrinfo(info);
+
+        if ( ! p)
+                die("failed to bind socket");
 }
 
 static void cleanup(void)
 {
-
+        close(server.sock);
 }
 
 static void logerr(const char *fmt, ...)
@@ -245,6 +293,7 @@ int main(int argc, char **argv)
                 die(VERSION);
 
         srvinit(&args);
+        cleanup();
 
         return 0;
 }
