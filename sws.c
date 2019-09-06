@@ -1,16 +1,30 @@
 /* See LICENSE file for copyright and license details. */
 
+#include <getopt.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
+#define HELP            "usage: sws -aprihv\n\n" \
+                        "Simple Small Static Stupid Whatever Web Server.\n\n" \
+                        "  -a  ip address\n" \
+                        "  -p  port\n" \
+                        "  -r  webroot\n" \
+                        "  -i  index page\n" \
+                        "  -h  help message\n" \
+                        "  -v  version"
+
 #define VERSION         "0.6.0"
+#define DEFAULTINDEX    "index.html"
 
 #define BUFCHUNK        256             /* minimum buffer capacity increment */
 
 #define MAX(a, b)       ((a) > (b) ? (a) : (b))
 
 typedef struct Buffer   Buffer;
+typedef struct Args     Args;
 typedef struct HRange   HRange;
 typedef struct HReq     HReq;
 typedef struct HResp    HResp;
@@ -21,6 +35,16 @@ struct Buffer                           /* autogrowing characters buffer */
         size_t          cap;
         size_t          len;
         unsigned char  *data;
+};
+
+struct Args                             /* command line arguments */
+{
+        const char     *address;
+        const char     *port;
+        const char     *rootpath;
+        const char     *index;
+        int             help;
+        int             version;
 };
 
 struct Server                           /* server informations */
@@ -75,6 +99,12 @@ static int      bufreserve(Buffer *, size_t n);
 static void     bufclear(Buffer *);
 static void     buftruncate(Buffer *, size_t newlen);
 static void     bufdeinit(Buffer *);
+static void     parseargs(Args *, int argc, char **argv);
+static void     srvinit(Args *);
+static void     logerr(const char *fmt, ...);
+static void     vlogerr(const char *fmt, va_list ap);
+static void     cleanup(void);
+static void     die(const char *reason, ...);
 
 static void bufinit(Buffer *buf)
 {
@@ -136,10 +166,85 @@ static void bufdeinit(Buffer *buf)
         free(buf->data);
 }
 
+static void parseargs(Args *args, int argc, char **argv)
+{
+        int opt;
+
+        while ((opt = getopt(argc, argv, "a:p:r:i:hv")) != -1) {
+                switch (opt) {
+                case 'a':
+                        args->address = optarg;
+                        break;
+                case 'p':
+                        args->port = optarg;
+                        break;
+                case 'r':
+                        args->rootpath = optarg;
+                        break;
+                case 'i':
+                        args->index = optarg;
+                        break;
+                case 'h':
+                        args->help = 1;
+                        break;
+                case 'v':
+                        args->version = 1;
+                        break;
+                }
+        }
+}
+
+static void srvinit(Args *args)
+{
+        server.index = args->index ? args->index : DEFAULTINDEX;
+}
+
+static void cleanup(void)
+{
+
+}
+
+static void logerr(const char *fmt, ...)
+{
+        va_list ap;
+
+        va_start(ap, fmt);
+        vlogerr(fmt, ap);
+        va_end(ap);
+}
+
+static void vlogerr(const char *fmt, va_list ap)
+{
+        fprintf(stderr, "sws: ");
+        vfprintf(stderr, fmt, ap);
+        fprintf(stderr, "\n");
+}
+
+static void die(const char *reason, ...)
+{
+        va_list ap;
+
+        va_start(ap, reason);
+        vlogerr(reason, ap);
+        va_end(ap);
+
+        cleanup();
+        exit(EXIT_FAILURE);
+}
+
 int main(int argc, char **argv)
 {
-        (void)server;
-        (void)argc;
-        (void)argv;
+        Args args;
+
+        memset(&args, 0, sizeof(args));
+
+        parseargs(&args, argc, argv);
+        if (args.help)
+                die(HELP);
+        if (args.version)
+                die(VERSION);
+
+        srvinit(&args);
+
         return 0;
 }
