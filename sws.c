@@ -116,6 +116,9 @@ static void     sighandler(int);
 static void     logsrvinfo(void);
 static void     run(void);
 static void     handlereq(int client);
+static HConn   *hopen(int client);
+static void     hclear(HConn *);
+static void     hclose(HConn *);
 static void     logerr(const char *fmt, ...);
 static void     vlogerr(const char *fmt, va_list ap);
 static void     cleanup(void);
@@ -355,11 +358,83 @@ static void run(void)
 
 static void handlereq(int client)
 {
-        FILE *f = fdopen(client, "r");
         int c;
-        while ((c = fgetc(f)) != EOF)
+        HConn *conn = hopen(client);
+        if ( ! conn) {
+                logerr("cannot open http connection");
+                return;
+        }
+
+        while ((c = fgetc(conn->in)) != EOF)
                 putchar(c);
-        fclose(f);
+
+        hclose(conn);
+}
+
+static HConn *hopen(int client)
+{
+        HConn *conn;
+        int outfd;
+
+        if ( ! (conn = malloc(sizeof(*conn))))
+                goto errconn;
+        if ( ! (conn->in = fdopen(client, "r")))
+                goto errin;
+        if ((outfd = dup(client)) == -1)
+                goto erroutfd;
+        if ( ! (conn->out = fdopen(outfd, "w")))
+                goto errout;
+
+        conn->req.uri = NULL;
+        conn->resp.file = NULL;
+        bufinit(&conn->resp.head);
+        bufinit(&conn->resp.content);
+        bufinit(&conn->buf);
+
+        hclear(conn);
+
+        return conn;
+errout:
+        close(outfd);
+erroutfd:
+        fclose(conn->in);
+errin:
+        free(conn);
+errconn:
+        return NULL;
+}
+
+static void hclear(HConn *conn)
+{
+        conn->req.timestamp   = (time_t)-1;
+        conn->req.method[0]   = '\0';
+        conn->req.keepalive   = 0;
+        conn->req.ifmodsince  = (time_t)-1;
+        conn->req.range.start = -1;
+        conn->req.range.end   = -1;
+        conn->resp.status     = 500;
+
+        free(conn->req.uri);
+        conn->req.uri = NULL;
+
+        if (conn->resp.file)
+                fclose(conn->resp.file);
+        conn->resp.file = NULL;
+
+        bufclear(&conn->resp.head);
+        bufclear(&conn->resp.content);
+        bufclear(&conn->buf);
+}
+
+static void hclose(HConn *conn)
+{
+        hclear(conn);   /* to free req.uri and close resp.file */
+        bufdeinit(&conn->resp.head);
+        bufdeinit(&conn->resp.content);
+        bufdeinit(&conn->buf);
+        fclose(conn->in);
+        fclose(conn->out);
+        free(conn);
 }
 
 static void cleanup(void)
