@@ -87,6 +87,7 @@ struct HResp                            /* http response */
         Buffer          head;           /* buffer for response line and headers */
         Buffer          content;        /* buffer for generated responses */
         FILE           *file;           /* file to send as response or NULL if sending generated response */
+        size_t          sent;           /* number of bytes sent to client */
 };
 
 struct HConn                            /* http connection */
@@ -119,10 +120,12 @@ static void     handlereq(int client);
 static HConn   *hopen(int client);
 static void     hclear(HConn *);
 static void     hclose(HConn *);
+static void     loghconn(HConn *);
+static const char *strstatus(int);
 static void     logerr(const char *fmt, ...);
 static void     vlogerr(const char *fmt, va_list ap);
-static void     cleanup(void);
 static void     die(const char *reason, ...);
+static void     cleanup(void);
 
 static void bufinit(Buffer *buf)
 {
@@ -311,8 +314,7 @@ static void logsrvinfo(void)
 {
         struct sockaddr_storage sa;
         socklen_t               salen = sizeof(sa);
-        char                    address[INET6_ADDRSTRLEN];
-        char                    port[6];
+        char                    address[INET6_ADDRSTRLEN], port[6];
 
         memset(&sa, 0, salen);
         if (getsockname(server.sock, (struct sockaddr *)&sa, &salen) == -1)
@@ -329,7 +331,7 @@ static void logsrvinfo(void)
         } else
                 die("logsrvinfo: unknown ss_family");
 
-        printf("serving %s at %s:%s pid is %d\n", server.rootpath, address, port, getpid());
+        printf("serving %s at %s:%s pid is %ld\n", server.rootpath, address, port, (long)getpid());
 }
 
 static void run(void)
@@ -368,6 +370,7 @@ static void handlereq(int client)
         while ((c = fgetc(conn->in)) != EOF)
                 putchar(c);
 
+        loghconn(conn);
         hclose(conn);
 }
 
@@ -413,6 +416,7 @@ static void hclear(HConn *conn)
         conn->req.range.start = -1;
         conn->req.range.end   = -1;
         conn->resp.status     = 500;
+        conn->resp.sent       = 0;
 
         free(conn->req.uri);
         conn->req.uri = NULL;
@@ -437,10 +441,63 @@ static void hclose(HConn *conn)
         free(conn);
 }
 
-static void cleanup(void)
+static void loghconn(HConn *conn)
 {
-        close(server.sock);
-        free(server.rootpath);
+        struct sockaddr_storage sa;
+        socklen_t               salen = sizeof(sa);
+        char                    address[INET6_ADDRSTRLEN], port[6], timestamp[64];
+
+        memset(&sa, 0, salen);
+        if (getpeername(fileno(conn->in), (struct sockaddr *)&sa, &salen) == -1) {
+                logerr("getpeername: %s", strerror(errno));
+                address[0] = port[0] = '\0';
+        } else {
+                if (sa.ss_family == AF_INET) {
+                        inet_ntop(AF_INET, &(((struct sockaddr_in *)&sa)->sin_addr), address, INET_ADDRSTRLEN);
+                        sprintf(port, "%u", ntohs(((struct sockaddr_in *)&sa)->sin_port));
+
+                } else if (sa.ss_family == AF_INET6) {
+                        inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)&sa)->sin6_addr), address, INET6_ADDRSTRLEN);
+                        sprintf(port, "%u", ntohs(((struct sockaddr_in6 *)&sa)->sin6_port));
+
+                } else {
+                        logerr("loghconn: unknown ss_family");
+                        address[0] = port[0] = '\0';
+                }
+        }
+
+        strftime(timestamp, sizeof(timestamp), "%d/%b/%Y:%H:%M:%S %Z", localtime(&conn->req.timestamp));
+
+        printf("%s:%s [%s] \"%s %s\" %d %s %lu\n",
+               address,
+               port,
+               timestamp,
+               conn->req.method,
+               conn->req.uri,
+               conn->resp.status,
+               strstatus(conn->resp.status),
+               (unsigned long)conn->resp.sent);
+}
+
+static const char *strstatus(int status)
+{
+        switch (status) {
+        case 200: return "OK";
+        case 206: return "Partial Content";
+        case 301: return "Moved Permanently";
+        case 304: return "Not Modified";
+        case 400: return "Bad Request";
+        case 403: return "Forbidden";
+        case 404: return "Not Found";
+        case 408: return "Request Timeout";
+        case 413: return "Payload Too Large";
+        case 414: return "URI Too Long";
+        case 416: return "Range Not Satisfiable";
+        case 500: return "Internal Server Error";
+        case 501: return "Not Implemented";
+        case 505: return "HTTP Version Not Supported";
+        default:  return NULL;
+        }
 }
 
 static void logerr(const char *fmt, ...)
@@ -469,6 +526,12 @@ static void die(const char *reason, ...)
 
         cleanup();
         exit(EXIT_FAILURE);
+}
+
+static void cleanup(void)
+{
+        close(server.sock);
+        free(server.rootpath);
 }
 
 int main(int argc, char **argv)
