@@ -115,6 +115,7 @@ static void     setuprootpath(Args *);
 static void     setupsighandler(void);
 static void     sighandler(int);
 static void     logsrvinfo(void);
+static void     ssinetntop(struct sockaddr_storage *, char *address, char *port);
 static void     run(void);
 static void     handlereq(int client);
 static HConn   *hopen(int client);
@@ -312,26 +313,35 @@ static void sighandler(int sig)
 
 static void logsrvinfo(void)
 {
-        struct sockaddr_storage sa;
-        socklen_t               salen = sizeof(sa);
+        struct sockaddr_storage ss;
+        socklen_t               sslen = sizeof(ss);
         char                    address[INET6_ADDRSTRLEN], port[6];
 
-        memset(&sa, 0, salen);
-        if (getsockname(server.sock, (struct sockaddr *)&sa, &salen) == -1)
+        memset(&ss, 0, sslen);
+        if (getsockname(server.sock, (struct sockaddr *)&ss, &sslen) == -1)
                 die("getsockname: %s", strerror(errno));
 
-        if (sa.ss_family == AF_INET) {
-                inet_ntop(AF_INET, &(((struct sockaddr_in *)&sa)->sin_addr), address, INET_ADDRSTRLEN);
-                sprintf(port, "%u", ntohs(((struct sockaddr_in *)&sa)->sin_port));
+        ssinetntop(&ss, address, port);
 
-        } else if (sa.ss_family == AF_INET6) {
-                inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)&sa)->sin6_addr), address, INET6_ADDRSTRLEN);
-                sprintf(port, "%u", ntohs(((struct sockaddr_in6 *)&sa)->sin6_port));
+        printf("serving %s at %s:%s pid is %ld\n",
+               server.rootpath,
+               address,
+               port,
+               (long)getpid());
+}
+
+static void ssinetntop(struct sockaddr_storage *ss, char *address, char *port)
+{
+        if (ss->ss_family == AF_INET) {
+                inet_ntop(AF_INET, &(((struct sockaddr_in *)ss)->sin_addr), address, INET_ADDRSTRLEN);
+                sprintf(port, "%u", ntohs(((struct sockaddr_in *)ss)->sin_port));
+
+        } else if (ss->ss_family == AF_INET6) {
+                inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)ss)->sin6_addr), address, INET6_ADDRSTRLEN);
+                sprintf(port, "%u", ntohs(((struct sockaddr_in6 *)ss)->sin6_port));
 
         } else
-                die("logsrvinfo: unknown ss_family");
-
-        printf("serving %s at %s:%s pid is %ld\n", server.rootpath, address, port, (long)getpid());
+                address[0] = port[0] = '\0';
 }
 
 static void run(void)
@@ -443,28 +453,17 @@ static void hclose(HConn *conn)
 
 static void loghconn(HConn *conn)
 {
-        struct sockaddr_storage sa;
-        socklen_t               salen = sizeof(sa);
+        struct sockaddr_storage ss;
+        socklen_t               sslen = sizeof(ss);
         char                    address[INET6_ADDRSTRLEN], port[6], timestamp[64];
 
-        memset(&sa, 0, salen);
-        if (getpeername(fileno(conn->in), (struct sockaddr *)&sa, &salen) == -1) {
+        memset(&ss, 0, sslen);
+        address[0] = port[0] = '\0';
+
+        if (getpeername(fileno(conn->in), (struct sockaddr *)&ss, &sslen) == -1)
                 logerr("getpeername: %s", strerror(errno));
-                address[0] = port[0] = '\0';
-        } else {
-                if (sa.ss_family == AF_INET) {
-                        inet_ntop(AF_INET, &(((struct sockaddr_in *)&sa)->sin_addr), address, INET_ADDRSTRLEN);
-                        sprintf(port, "%u", ntohs(((struct sockaddr_in *)&sa)->sin_port));
-
-                } else if (sa.ss_family == AF_INET6) {
-                        inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)&sa)->sin6_addr), address, INET6_ADDRSTRLEN);
-                        sprintf(port, "%u", ntohs(((struct sockaddr_in6 *)&sa)->sin6_port));
-
-                } else {
-                        logerr("loghconn: unknown ss_family");
-                        address[0] = port[0] = '\0';
-                }
-        }
+        else
+                ssinetntop(&ss, address, port);
 
         strftime(timestamp, sizeof(timestamp), "%d/%b/%Y:%H:%M:%S %Z", localtime(&conn->req.timestamp));
 
