@@ -114,6 +114,8 @@ static void     setuprootpath(Args *);
 static void     setupsighandler(void);
 static void     sighandler(int);
 static void     logsrvinfo(void);
+static void     run(void);
+static void     handlereq(int client);
 static void     logerr(const char *fmt, ...);
 static void     vlogerr(const char *fmt, va_list ap);
 static void     cleanup(void);
@@ -322,9 +324,42 @@ static void logsrvinfo(void)
                 sprintf(port, "%u", ntohs(((struct sockaddr_in6 *)&sa)->sin6_port));
 
         } else
-                die("logsrvinfo: unknown sa_family");
+                die("logsrvinfo: unknown ss_family");
 
         printf("serving %s at %s:%s pid is %d\n", server.rootpath, address, port, getpid());
+}
+
+static void run(void)
+{
+        server.running = 1;
+        while (server.running) {
+                int client = accept(server.sock, NULL, NULL);
+                if (client == -1) {
+                        if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
+                                logerr("accept: %s", strerror(errno));
+                        continue;
+                }
+
+                switch (fork()) {
+                case 0:
+                        handlereq(client);
+                        return;
+                case -1:
+                        logerr("fork: %s", strerror(errno));
+                        /* fallthrough */
+                default:
+                        close(client);
+                }
+        }
+}
+
+static void handlereq(int client)
+{
+        FILE *f = fdopen(client, "r");
+        int c;
+        while ((c = fgetc(f)) != EOF)
+                putchar(c);
+        fclose(f);
 }
 
 static void cleanup(void)
@@ -375,6 +410,7 @@ int main(int argc, char **argv)
 
         initsrv(&args);
         logsrvinfo();
+        run();
         cleanup();
 
         return 0;
