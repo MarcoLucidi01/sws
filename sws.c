@@ -108,20 +108,20 @@ static int      bufreserve(Buffer *, size_t n);
 static void     bufclear(Buffer *);
 static void     buftruncate(Buffer *, size_t newlen);
 static void     bufdeinit(Buffer *);
-static void     parseargs(Args *, int argc, char **argv);
-static void     initsrv(Args *);
-static void     setupsock(Args *);
-static void     setuprootpath(Args *);
+static void     parseargs(Args *, int argc, char *const *argv);
+static void     initsrv(const Args *);
+static void     setupsock(const Args *);
+static void     setuprootpath(const Args *);
 static void     setupsighandler(void);
 static void     sighandler(int);
 static void     logsrvinfo(void);
-static void     ssinetntop(struct sockaddr_storage *, char *address, char *port);
+static void     ssinetntop(const struct sockaddr_storage *, char *address, char *port);
 static void     run(void);
 static void     handlereq(int client);
 static HConn   *hopen(int client);
 static void     hclear(HConn *);
 static void     hclose(HConn *);
-static void     loghconn(HConn *);
+static void     loghconn(const HConn *);
 static const char *strstatus(int);
 static void     logerr(const char *fmt, ...);
 static void     vlogerr(const char *fmt, va_list ap);
@@ -189,7 +189,7 @@ static void bufdeinit(Buffer *buf)
         free(buf->data);
 }
 
-static void parseargs(Args *args, int argc, char **argv)
+static void parseargs(Args *args, int argc, char *const *argv)
 {
         int opt;
 
@@ -217,7 +217,7 @@ static void parseargs(Args *args, int argc, char **argv)
         }
 }
 
-static void initsrv(Args *args)
+static void initsrv(const Args *args)
 {
         setupsock(args);
         setuprootpath(args);
@@ -225,7 +225,7 @@ static void initsrv(Args *args)
         server.index = args->index ? args->index : DEFAULTINDEX;
 }
 
-static void setupsock(Args *args)
+static void setupsock(const Args *args)
 {
         struct addrinfo hints, *info, *p;
         int err, yes = 1;
@@ -265,7 +265,7 @@ static void setupsock(Args *args)
                 die("failed to bind socket");
 }
 
-static void setuprootpath(Args *args)
+static void setuprootpath(const Args *args)
 {
         Buffer buf;
 
@@ -331,7 +331,7 @@ static void logsrvinfo(void)
                (long)getpid());
 }
 
-static void ssinetntop(struct sockaddr_storage *ss, char *address, char *port)
+static void ssinetntop(const struct sockaddr_storage *ss, char *address, char *port)
 {
         if (ss->ss_family == AF_INET) {
                 inet_ntop(AF_INET, &(((struct sockaddr_in *)ss)->sin_addr), address, INET_ADDRSTRLEN);
@@ -452,7 +452,7 @@ static void hclose(HConn *conn)
         free(conn);
 }
 
-static void loghconn(HConn *conn)
+static void loghconn(const HConn *conn)
 {
         struct sockaddr_storage ss;
         socklen_t               sslen = sizeof(ss);
