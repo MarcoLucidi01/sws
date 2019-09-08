@@ -1,6 +1,7 @@
 /* See LICENSE file for copyright and license details. */
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <errno.h>
 #include <getopt.h>
 #include <netdb.h>
@@ -74,7 +75,7 @@ struct HRange                           /* http range header first value */
 struct HReq                             /* http request */
 {
         time_t          timestamp;
-        char            method[16];
+        char            method[8];
         char           *uri;            /* decoded request uri */
         int             keepalive;      /* connection header (1 keep-alive, 0 close) */
         time_t          ifmodsince;     /* if modified since header timestamp */
@@ -121,6 +122,8 @@ static void     handlereq(int client);
 static HConn   *hopen(int client);
 static void     hclear(HConn *);
 static void     hclose(HConn *);
+static int      hrecvreq(HConn *);
+static int      hparsemethod(HConn *);
 static void     loghconn(const HConn *);
 static const char *strstatus(int);
 static void     logerr(const char *fmt, ...);
@@ -371,15 +374,13 @@ static void run(void)
 
 static void handlereq(int client)
 {
-        int c;
         HConn *conn = hopen(client);
         if ( ! conn) {
                 logerr("cannot open http connection");
                 return;
         }
 
-        while ((c = fgetc(conn->in)) != EOF)
-                putchar(c);
+        conn->resp.status = hrecvreq(conn);
 
         loghconn(conn);
         hclose(conn);
@@ -450,6 +451,37 @@ static void hclose(HConn *conn)
         fclose(conn->in);
         fclose(conn->out);
         free(conn);
+}
+
+static int hrecvreq(HConn *conn)
+{
+        conn->req.timestamp = time(NULL);
+        return hparsemethod(conn);
+}
+
+static int hparsemethod(HConn *conn)
+{
+        int    c;
+        size_t i = 0;
+
+        for (; i < sizeof(conn->req.method) - 1; i++) {
+                c = fgetc(conn->in);
+                if (c == ' ' || ! isupper(c) || c == EOF)
+                        break;
+
+                conn->req.method[i] = c;
+        }
+
+        conn->req.method[i] = '\0';
+
+        if (i == 0 || c != ' ')
+                return 400;
+
+        if (strcmp("GET",  conn->req.method) != 0
+        &&  strcmp("HEAD", conn->req.method) != 0)
+                return 501;
+
+        return 200;
 }
 
 static void loghconn(const HConn *conn)
