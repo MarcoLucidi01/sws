@@ -138,18 +138,19 @@ static void bufinit(Buffer *buf)
 static int bufputs(Buffer *buf, const char *s)
 {
         while (*s)
-                if (bufputc(buf, *s++) == EOF)
-                        return EOF;
+                if (bufputc(buf, *s++) == -1)
+                        return -1;
 
-        return 1;
+        return 0;
 }
 
 static int bufputc(Buffer *buf, int c)
 {
-        if (buf->len == buf->cap && bufreserve(buf, 1) == EOF)
-                return EOF;
+        if (buf->len == buf->cap && bufreserve(buf, 1) == -1)
+                return -1;
 
-        return buf->data[buf->len++] = (unsigned char)c;
+        buf->data[buf->len++] = (unsigned char)c;
+        return 0;
 }
 
 static int bufreserve(Buffer *buf, size_t n)
@@ -159,17 +160,17 @@ static int bufreserve(Buffer *buf, size_t n)
 
         available = buf->cap - buf->len;
         if (available >= n)
-                return 1;
+                return 0;
 
         newcap = buf->cap + MAX(BUFCHUNK, (n - available));
 
         p = realloc(buf->data, newcap);
         if ( ! p)
-                return EOF;
+                return -1;
 
         buf->cap = newcap;
         buf->data = p;
-        return 1;
+        return 0;
 }
 
 static void bufclear(Buffer *buf)
@@ -273,7 +274,7 @@ static void setuprootpath(Args *args)
 
         bufinit(&buf);
         for (;;) {
-                if (bufreserve(&buf, BUFCHUNK) == EOF)
+                if (bufreserve(&buf, BUFCHUNK) == -1)
                         die("buf_reserve: %s", strerror(errno));
 
                 server.rootpath = (char *)buf.data;
