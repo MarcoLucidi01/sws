@@ -29,7 +29,8 @@
 #define DEFAULTPORT     "8080"
 #define DEFAULTBACKLOG  10
 #define DEFAULTINDEX    "index.html"
-
+#define METHODMAX       8               /* request method max length (including '\0') */
+#define URIMAX          8192            /* request uri max length */
 #define BUFCHUNK        256             /* minimum buffer capacity increment */
 
 #define MAX(a, b)       ((a) > (b) ? (a) : (b))
@@ -45,7 +46,7 @@ struct Buffer                           /* autogrowing characters buffer */
 {
         size_t          cap;
         size_t          len;
-        unsigned char  *data;
+        char           *data;
 };
 
 struct Args                             /* command line arguments */
@@ -75,7 +76,7 @@ struct HRange                           /* http range header first value */
 struct HReq                             /* http request */
 {
         time_t          timestamp;
-        char            method[8];
+        char            method[METHODMAX];
         char           *uri;            /* decoded request uri */
         int             keepalive;      /* connection header (1 keep-alive, 0 close) */
         time_t          ifmodsince;     /* if modified since header timestamp */
@@ -124,6 +125,8 @@ static void     hclear(HConn *);
 static void     hclose(HConn *);
 static int      hrecvreq(HConn *);
 static int      hparsemethod(HConn *);
+static int      hparseuri(HConn *);
+static char    *percentdec(char *);
 static void     loghconn(const HConn *);
 static const char *strstatus(int);
 static void     logerr(const char *fmt, ...);
@@ -159,7 +162,7 @@ static int bufputc(Buffer *buf, int c)
 static int bufreserve(Buffer *buf, size_t n)
 {
         size_t available, newcap;
-        unsigned char *p;
+        char *p;
 
         available = buf->cap - buf->len;
         if (available >= n)
@@ -280,7 +283,7 @@ static void setuprootpath(const Args *args)
                 if (bufreserve(&buf, BUFCHUNK) == -1)
                         die("buf_reserve: %s", strerror(errno));
 
-                server.rootpath = (char *)buf.data;
+                server.rootpath = buf.data;
                 if (getcwd(server.rootpath, buf.cap))
                         break;
                 if (errno != ERANGE)
@@ -455,8 +458,14 @@ static void hclose(HConn *conn)
 
 static int hrecvreq(HConn *conn)
 {
+        int ret;
+
+        if ((ret = hparsemethod(conn)) != 200)
+                return ret;
+
         conn->req.timestamp = time(NULL);
-        return hparsemethod(conn);
+
+        return hparseuri(conn);
 }
 
 static int hparsemethod(HConn *conn)
@@ -482,6 +491,52 @@ static int hparsemethod(HConn *conn)
                 return 501;
 
         return 200;
+}
+
+static int hparseuri(HConn *conn)
+{
+        int     c;
+        Buffer *buf = &conn->buf;
+        size_t  i   = 0;
+
+        bufclear(buf);
+        for (; i < URIMAX; i++) {
+                c = fgetc(conn->in);
+                if (c == ' ' || c == EOF)
+                        break;
+                if (bufputc(buf, c) == -1)
+                        return 500;
+        }
+
+        if (i >= URIMAX)
+                return 414;
+        if (i == 0 || c != ' ')
+                return 400;
+        if (bufputc(buf, '\0') == -1)
+                return 500;
+        if ( ! (conn->req.uri = strdup(percentdec(buf->data))))
+                return 500;
+
+        return 200;
+}
+
+static char *percentdec(char *s)
+{
+        char *e = s;    /* encoded character pointer */
+        char *d = s;    /* decoded character pointer */
+
+        for (; *e; e++, d++) {
+                if (*e == '%' && isxdigit(e[1]) && isxdigit(e[2])) {
+                        e++;
+                        *d  = (isdigit(*e) ? (*e - '0') : (toupper(*e) - 'A' + 0x0A)) * 0x10;
+                        e++;
+                        *d += (isdigit(*e) ? (*e - '0') : (toupper(*e) - 'A' + 0x0A));
+                } else
+                        *d = *e == '+' ? ' ' : *e;
+        }
+
+        *d = '\0';
+        return s;
 }
 
 static void loghconn(const HConn *conn)
