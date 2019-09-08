@@ -16,7 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define HELP            "usage: sws -aprihv\n\n" \
+#define USAGE           "usage: sws -aprihv\n\n" \
                         "Simple Small Static Stupid Whatever Web Server.\n\n" \
                         "  -a  ip address\n" \
                         "  -p  port\n" \
@@ -24,13 +24,12 @@
                         "  -i  index page\n" \
                         "  -h  help message\n" \
                         "  -v  version"
-
 #define VERSION         "0.6.0"
 #define DEFAULTPORT     "8080"
 #define DEFAULTBACKLOG  10
 #define DEFAULTINDEX    "index.html"
-#define METHODMAX       8               /* request method max length (including '\0') */
-#define URIMAX          8192            /* request uri max length */
+#define METHODMAX       8               /* request method max size */
+#define URIMAX          8192            /* request uri max size */
 #define BUFCHUNK        256             /* minimum buffer capacity increment */
 
 #define MAX(a, b)       ((a) > (b) ? (a) : (b))
@@ -75,7 +74,7 @@ struct HRange                           /* http range header first value */
 
 struct HReq                             /* http request */
 {
-        time_t          timestamp;
+        time_t          timestamp;      /* request arrival timestamp */
         char            method[METHODMAX];
         char           *uri;            /* decoded request uri */
         int             keepalive;      /* connection header (1 keep-alive, 0 close) */
@@ -103,36 +102,36 @@ struct HConn                            /* http connection */
 
 static struct Server server;            /* global server informations */
 
-static void     bufinit(Buffer *);
-static int      bufputs(Buffer *, const char *s);
-static int      bufputc(Buffer *, int c);
-static int      bufreserve(Buffer *, size_t n);
-static void     bufclear(Buffer *);
-static void     buftruncate(Buffer *, size_t newlen);
-static void     bufdeinit(Buffer *);
-static void     parseargs(Args *, int argc, char *const *argv);
-static void     initsrv(const Args *);
-static void     setupsock(const Args *);
-static void     setuprootpath(const Args *);
-static void     setupsighandler(void);
-static void     sighandler(int);
-static void     logsrvinfo(void);
-static void     ssinetntop(const struct sockaddr_storage *, char *address, char *port);
-static void     run(void);
-static void     handlereq(int client);
-static HConn   *hopen(int client);
-static void     hclear(HConn *);
-static void     hclose(HConn *);
-static int      hrecvreq(HConn *);
-static int      hparsemethod(HConn *);
-static int      hparseuri(HConn *);
-static char    *percentdec(char *);
-static void     loghconn(const HConn *);
-static const char *strstatus(int);
-static void     logerr(const char *fmt, ...);
-static void     vlogerr(const char *fmt, va_list ap);
-static void     die(const char *reason, ...);
-static void     cleanup(void);
+static void             bufinit(Buffer *);
+static int              bufputs(Buffer *, const char *s);
+static int              bufputc(Buffer *, int c);
+static int              bufreserve(Buffer *, size_t n);
+static void             bufclear(Buffer *);
+static void             buftruncate(Buffer *, size_t newlen);
+static void             bufdeinit(Buffer *);
+static void             parseargs(Args *, int argc, char *const *argv);
+static void             initsrv(const Args *);
+static void             setupsock(const Args *);
+static void             setuprootpath(const Args *);
+static void             setupsighandler(void);
+static void             sighandler(int);
+static void             logsrvinfo(void);
+static void             ssinetntop(const struct sockaddr_storage *, char *address, char *port);
+static void             run(void);
+static void             handlereq(int client);
+static HConn           *hopen(int client);
+static void             hclear(HConn *);
+static void             hclose(HConn *);
+static int              hrecvreq(HConn *);
+static int              hparsemethod(HConn *);
+static int              hparseuri(HConn *);
+static char            *percentdec(char *);
+static void             loghconn(const HConn *);
+static const char      *strstatus(int);
+static void             logerr(const char *fmt, ...);
+static void             vlogerr(const char *fmt, va_list ap);
+static void             die(const char *reason, ...);
+static void             cleanup(void);
 
 static void bufinit(Buffer *buf)
 {
@@ -463,31 +462,31 @@ static int hrecvreq(HConn *conn)
         if ((ret = hparsemethod(conn)) != 200)
                 return ret;
 
-        conn->req.timestamp = time(NULL);
-
         return hparseuri(conn);
 }
 
 static int hparsemethod(HConn *conn)
 {
+        char   buf[METHODMAX];
+        size_t len = 0;
         int    c;
-        size_t i = 0;
 
-        for (; i < sizeof(conn->req.method) - 1; i++) {
-                c = fgetc(conn->in);
-                if (c == ' ' || ! isupper(c) || c == EOF)
+        while ((c = fgetc(conn->in)) != EOF) {
+                if (c == ' ' || ! isupper(c) || len == sizeof(buf) - 1)
                         break;
 
-                conn->req.method[i] = c;
+                buf[len++] = c;
         }
 
-        conn->req.method[i] = '\0';
+        conn->req.timestamp = time(NULL);
 
-        if (i == 0 || c != ' ')
+        if (len == 0 || c != ' ')
                 return 400;
 
-        if (strcmp("GET",  conn->req.method) != 0
-        &&  strcmp("HEAD", conn->req.method) != 0)
+        memcpy(conn->req.method, buf, len);
+        conn->req.method[len] = '\0';
+
+        if (strcmp("GET", conn->req.method) != 0 && strcmp("HEAD", conn->req.method) != 0)
                 return 501;
 
         return 200;
@@ -495,26 +494,26 @@ static int hparsemethod(HConn *conn)
 
 static int hparseuri(HConn *conn)
 {
-        int     c;
         Buffer *buf = &conn->buf;
-        size_t  i   = 0;
+        int     c;
 
         bufclear(buf);
-        for (; i < URIMAX; i++) {
-                c = fgetc(conn->in);
-                if (c == ' ' || c == EOF)
+        while ((c = fgetc(conn->in)) != EOF) {
+                if (c == ' ')
                         break;
+                if (buf->len == URIMAX - 1)
+                        return 414;
                 if (bufputc(buf, c) == -1)
                         return 500;
         }
 
-        if (i >= URIMAX)
-                return 414;
-        if (i == 0 || c != ' ')
+        if (buf->len == 0 || c != ' ')
                 return 400;
         if (bufputc(buf, '\0') == -1)
                 return 500;
-        if ( ! (conn->req.uri = strdup(percentdec(buf->data))))
+
+        percentdec(buf->data);
+        if ( ! (conn->req.uri = strdup(buf->data)))
                 return 500;
 
         return 200;
@@ -629,7 +628,7 @@ int main(int argc, char **argv)
 
         parseargs(&args, argc, argv);
         if (args.help)
-                die(HELP);
+                die(USAGE);
         if (args.version)
                 die(VERSION);
 
