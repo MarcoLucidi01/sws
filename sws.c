@@ -505,7 +505,7 @@ static void loghconn(const HConn *conn)
                port,
                timestamp,
                conn->req.method,
-               conn->req.uri,
+               conn->req.uri ? conn->req.uri : "",
                conn->resp.status,
                strstatus(conn->resp.status),
                (unsigned long)conn->resp.sent);
