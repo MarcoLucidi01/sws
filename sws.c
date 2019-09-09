@@ -125,6 +125,7 @@ static void             hclose(HConn *);
 static int              hrecvreq(HConn *);
 static int              hparsemethod(HConn *);
 static int              hparseuri(HConn *);
+static int              hparseversion(HConn *);
 static char            *percentdec(char *);
 static void             loghconn(const HConn *);
 static const char      *strstatus(int);
@@ -459,10 +460,15 @@ static int hrecvreq(HConn *conn)
 {
         int ret;
 
-        if ((ret = hparsemethod(conn)) != 200)
-                return ret;
+        /*
+         * stop at first return value != 200
+         */
+        if ((ret = hparsemethod(conn))  != 200
+        ||  (ret = hparseuri(conn))     != 200
+        ||  (ret = hparseversion(conn)) != 200) {
+        }
 
-        return hparseuri(conn);
+        return ret;
 }
 
 static int hparsemethod(HConn *conn)
@@ -515,6 +521,38 @@ static int hparseuri(HConn *conn)
         percentdec(buf->data);
         if ( ! (conn->req.uri = strdup(buf->data)))
                 return 500;
+
+        return 200;
+}
+
+static int hparseversion(HConn *conn)
+{
+        int c;
+
+        if (fgetc(conn->in) != 'H'
+        ||  fgetc(conn->in) != 'T'
+        ||  fgetc(conn->in) != 'T'
+        ||  fgetc(conn->in) != 'P'
+        ||  fgetc(conn->in) != '/')
+                return 400;
+
+        c = fgetc(conn->in);
+        if ( ! isdigit(c))
+                return 400;
+        if (c != '1')
+                return 505;
+
+        if (fgetc(conn->in) != '.')
+                return 400;
+
+        c = fgetc(conn->in);
+        if ( ! isdigit(c))
+                return 400;
+        if (c != '0' && c != '1')
+                return 505;
+
+        if (fgetc(conn->in) != '\r' || fgetc(conn->in) != '\n')
+                return 400;
 
         return 200;
 }
