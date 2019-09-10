@@ -91,6 +91,7 @@ struct HReq                             /* http request */
         int             keepalive;      /* connection header (1 keep-alive, 0 close) */
         time_t          ifmodsince;     /* if modified since header timestamp */
         HRange          range;
+        long            contentlen;     /* request payload length. If present will be skipped */
 };
 
 struct HResp                            /* http response */
@@ -139,6 +140,7 @@ static int              hparseheaders(HConn *);
 static HParser         *findhparser(const char *name);
 static int              hparsercmp(const void *name, const void *parser);
 static void             hparseconnection(HConn *, const char *value);
+static void             hparsecontentlen(HConn *, const char *value);
 static char            *percentdec(char *);
 static void             loghconn(const HConn *);
 static char            *strtrim(char *s);
@@ -150,7 +152,8 @@ static void             cleanup(void);
 
 static HParser hparsers[] =      /* keep sorted */
 {
-        { "connection", hparseconnection },
+        { "connection",         hparseconnection },
+        { "content-length",     hparsecontentlen },
 };
 
 static struct Server server;            /* global server informations */
@@ -451,6 +454,7 @@ static void hclear(HConn *conn)
         conn->req.ifmodsince  = (time_t)-1;
         conn->req.range.start = -1;
         conn->req.range.end   = -1;
+        conn->req.contentlen  = -1;
         conn->resp.status     = 500;
         conn->resp.sent       = 0;
 
@@ -627,6 +631,13 @@ static int hparsercmp(const void *name, const void *parser)
 static void hparseconnection(HConn *conn, const char *value)
 {
         conn->req.keepalive = strcmp(value, "keep-alive") == 0;
+}
+
+static void hparsecontentlen(HConn *conn, const char *value)
+{
+        long clen = atol(value);
+        if (clen > 0)
+                conn->req.contentlen = clen;
 }
 
 static char *percentdec(char *s)
