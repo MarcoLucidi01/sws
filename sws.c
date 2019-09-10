@@ -479,12 +479,14 @@ static void hclose(HConn *conn)
 
 static int hrecvreq(HConn *conn)
 {
-        int ret;
+        int ret = hparsemethod(conn);
+
+        conn->req.timestamp = time(NULL);
 
         /*
          * stop at first return value != 200
          */
-        if ((ret = hparsemethod(conn))  != 200
+        if (ret != 200
         ||  (ret = hparseuri(conn))     != 200
         ||  (ret = hparseversion(conn)) != 200
         ||  (ret = hparseheaders(conn)) != 200) {
@@ -505,9 +507,6 @@ static int hparsemethod(HConn *conn)
 
                 buf[len++] = c;
         }
-
-        conn->req.timestamp = time(NULL);
-
         if (len == 0 || c != ' ')
                 return 400;
 
@@ -534,7 +533,6 @@ static int hparseuri(HConn *conn)
                 if (bufputc(buf, c) == -1)
                         return 500;
         }
-
         if (buf->len == 0 || c != ' ')
                 return 400;
         if (bufputc(buf, '\0') == -1)
