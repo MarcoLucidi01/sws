@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -30,12 +31,16 @@
 #define DEFAULTINDEX    "index.html"
 #define METHODMAX       8               /* request method max size */
 #define URIMAX          8192            /* request uri max size */
+#define HEADERMAX       4096            /* single request header max size */
+#define MAXHEADERS      100             /* max number of request headers allowed */
 #define BUFCHUNK        256             /* minimum buffer capacity increment */
 
+#define ARRAYLEN(a)     (sizeof((a)) / sizeof((a)[0]))
 #define MAX(a, b)       ((a) > (b) ? (a) : (b))
 
 typedef struct Buffer   Buffer;
 typedef struct Args     Args;
+typedef struct HParser  HParser;
 typedef struct HRange   HRange;
 typedef struct HReq     HReq;
 typedef struct HResp    HResp;
@@ -64,6 +69,12 @@ struct Server                           /* server informations */
         int             running;        /* 1 if running, 0 if stopped */
         char           *rootpath;       /* current working directory absolute path */
         const char     *index;          /* index filename for directories requests */
+};
+
+struct HParser                          /* http header parser pair stored in table */
+{
+        const char     *name;           /* name of header used for searching in table */
+        void          (*parse)(HConn *, const char *value);     /* parser function */
 };
 
 struct HRange                           /* http range header first value */
@@ -100,8 +111,6 @@ struct HConn                            /* http connection */
         Buffer          buf;            /* common buffer used e.g. for building file paths */
 };
 
-static struct Server server;            /* global server informations */
-
 static void             bufinit(Buffer *);
 static int              bufputs(Buffer *, const char *s);
 static int              bufputc(Buffer *, int c);
@@ -126,13 +135,25 @@ static int              hrecvreq(HConn *);
 static int              hparsemethod(HConn *);
 static int              hparseuri(HConn *);
 static int              hparseversion(HConn *);
+static int              hparseheaders(HConn *);
+static HParser         *findhparser(const char *name);
+static int              hparsercmp(const void *name, const void *parser);
+static void             hparseconnection(HConn *, const char *value);
 static char            *percentdec(char *);
 static void             loghconn(const HConn *);
+static char            *strtrim(char *s);
 static const char      *strstatus(int);
 static void             logerr(const char *fmt, ...);
 static void             vlogerr(const char *fmt, va_list ap);
 static void             die(const char *reason, ...);
 static void             cleanup(void);
+
+static HParser hparsers[] =      /* keep sorted */
+{
+        { "connection", hparseconnection },
+};
+
+static struct Server server;            /* global server informations */
 
 static void bufinit(Buffer *buf)
 {
@@ -465,7 +486,8 @@ static int hrecvreq(HConn *conn)
          */
         if ((ret = hparsemethod(conn))  != 200
         ||  (ret = hparseuri(conn))     != 200
-        ||  (ret = hparseversion(conn)) != 200) {
+        ||  (ret = hparseversion(conn)) != 200
+        ||  (ret = hparseheaders(conn)) != 200) {
         }
 
         return ret;
@@ -557,6 +579,58 @@ static int hparseversion(HConn *conn)
         return 200;
 }
 
+static int hparseheaders(HConn *conn)
+{
+        Buffer *buf = &conn->buf;
+        int i, c;
+        char *name, *value;
+        HParser *parser;
+
+        for (i = 0; i < MAXHEADERS; i++) {
+                bufclear(buf);
+                while ((c = fgetc(conn->in)) != EOF) {
+                        if (c == '\r')
+                                break;
+                        if (buf->len == HEADERMAX - 1)
+                                return 400;     /* TODO see if there is a specific status code */
+                        if (bufputc(buf, c) == -1)
+                                return 500;
+                }
+                if (fgetc(conn->in) != '\n')
+                        return 400;
+                if (buf->len == 0)
+                        return 200;     /* end of headers */
+                if (bufputc(buf, '\0') == -1)
+                        return 500;
+
+                name = buf->data;
+                if ( ! (value = strchr(name, ':')))
+                        return 400;     /* malformed header */
+
+                *value++ = '\0';        /* null-terminate name string */
+
+                if ((parser = findhparser(name)))
+                        parser->parse(conn, strtrim(value));
+        }
+
+        return i < MAXHEADERS ? 200 : 400;
+}
+
+static HParser *findhparser(const char *name)
+{
+        return bsearch(name, hparsers, ARRAYLEN(hparsers), sizeof(*hparsers), hparsercmp);
+}
+
+static int hparsercmp(const void *name, const void *parser)
+{
+        return strcasecmp((const char *)name, ((const HParser *)parser)->name);
+}
+
+static void hparseconnection(HConn *conn, const char *value)
+{
+        conn->req.keepalive = strcmp(value, "keep-alive") == 0;
+}
+
 static char *percentdec(char *s)
 {
         char *e = s;    /* encoded character pointer */
@@ -601,6 +675,26 @@ static void loghconn(const HConn *conn)
                conn->resp.status,
                strstatus(conn->resp.status),
                (unsigned long)conn->resp.sent);
+}
+
+static char *strtrim(char *s)
+{
+        size_t len;
+        char *end;
+
+        for (; *s == ' ' || *s == '\t'; s++)
+                ;
+
+        len = strlen(s);
+
+        if (len > 0) {
+                end = s + len - 1;
+                for (; end > s && (*end == ' ' || *end == '\t'); end--)
+                        ;
+                end[1] = '\0';
+        }
+
+        return s;
 }
 
 static const char *strstatus(int status)
