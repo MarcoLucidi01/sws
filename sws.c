@@ -141,6 +141,7 @@ static HParser         *findhparser(const char *name);
 static int              hparsercmp(const void *name, const void *parser);
 static void             hparseconnection(HConn *, const char *value);
 static void             hparsecontentlen(HConn *, const char *value);
+static void             hparserange(HConn *, const char *value);
 static char            *percentdec(char *);
 static void             loghconn(const HConn *);
 static char            *strtrim(char *s);
@@ -154,6 +155,7 @@ static HParser hparsers[] =      /* keep sorted */
 {
         { "connection",         hparseconnection },
         { "content-length",     hparsecontentlen },
+        { "range",              hparserange      },
 };
 
 static struct Server server;            /* global server informations */
@@ -636,8 +638,50 @@ static void hparseconnection(HConn *conn, const char *value)
 static void hparsecontentlen(HConn *conn, const char *value)
 {
         long clen = atol(value);
+
         if (clen > 0)
                 conn->req.contentlen = clen;
+}
+
+static void hparserange(HConn *conn, const char *value)
+{
+        char buf[32];
+        const char *p = value;
+        long start = -1;
+        long end = -1;
+        size_t i;
+
+        if (strncmp(p, "bytes=", strlen("bytes=")) != 0)
+                return;
+
+        p += strlen("bytes=");
+
+        for (i = 0; isdigit(*p) && i < sizeof(buf) - 1; i++, p++)
+                buf[i] = *p;
+        buf[i] = '\0';
+
+        if (*p != '-')
+                return;
+
+        if (buf[0] != '\0')
+                start = atol(buf);
+
+        for (i = 0, p++; isdigit(*p) && i < sizeof(buf) - 1; i++, p++)
+                buf[i] = *p;
+        buf[i] = '\0';
+
+        if (*p != '\0' && *p != '-')
+                return;
+
+        if (buf[0] != '\0')
+                end = atol(buf);
+
+        if ((start >  -1 && end == -1)
+        ||  (start == -1 && end >  -1)
+        ||  (start >  -1 && end >  -1 && start <= end)) {
+                conn->req.range.start = start;
+                conn->req.range.end = end;
+        }
 }
 
 static char *percentdec(char *s)
