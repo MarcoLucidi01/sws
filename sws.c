@@ -306,7 +306,7 @@ static void setuprootpath(const Args *args)
 
         bufinit(&buf);
         for (;;) {
-                if (bufreserve(&buf, BUFCHUNK) == -1)
+                if (bufreserve(&buf, buf.cap + BUFCHUNK) == -1)
                         die("buf_reserve: %s", strerror(errno));
 
                 server.rootpath = buf.data;
