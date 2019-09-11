@@ -115,6 +115,7 @@ struct HConn                            /* http connection */
 static void             bufinit(Buffer *);
 static int              bufputs(Buffer *, const char *s);
 static int              bufputc(Buffer *, int c);
+static int              bufprintf(Buffer *, const char *fmt, ...);
 static int              bufreserve(Buffer *, size_t n);
 static void             bufclear(Buffer *);
 static void             buftruncate(Buffer *, size_t newlen);
@@ -183,6 +184,31 @@ static int bufputc(Buffer *buf, int c)
 
         buf->data[buf->len++] = (unsigned char)c;
         return 0;
+}
+
+static int bufprintf(Buffer *buf, const char *fmt, ...)
+{
+        va_list ap;
+        size_t prilen;
+
+        if (buf->len == buf->cap && bufreserve(buf, 1) == -1)
+                return -1;
+
+        va_start(ap, fmt);
+        prilen = vsnprintf(buf->data, buf->cap - buf->len, fmt, ap);
+        va_end(ap);
+
+        if (prilen >= buf->cap - buf->len) {
+                if (bufreserve(buf, prilen + 1) == -1)
+                        return -1;
+
+                va_start(ap, fmt);
+                prilen = vsnprintf(buf->data, buf->cap - buf->len, fmt, ap);
+                va_end(ap);
+        }
+
+        buf->len += prilen;
+        return prilen;
 }
 
 static int bufreserve(Buffer *buf, size_t n)
