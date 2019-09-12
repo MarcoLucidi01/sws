@@ -115,7 +115,6 @@ struct HConn                            /* http connection */
 static void             bufinit(Buffer *);
 static int              bufputs(Buffer *, const char *s);
 static int              bufputc(Buffer *, int c);
-static int              bufprintf(Buffer *, const char *fmt, ...);
 static int              bufreserve(Buffer *, size_t n);
 static void             bufclear(Buffer *);
 static void             buftruncate(Buffer *, size_t newlen);
@@ -143,6 +142,8 @@ static int              hparsercmp(const void *name, const void *parser);
 static void             hparseconnection(HConn *, const char *value);
 static void             hparsecontentlen(HConn *, const char *value);
 static void             hparserange(HConn *, const char *value);
+static int              hprintf(HConn *, const char *fmt, ...);
+static int              haddheader(HConn *, const char *name, const char *value, ...);
 static char            *percentdec(char *);
 static void             loghconn(const HConn *);
 static char            *strtrim(char *s);
@@ -182,33 +183,8 @@ static int bufputc(Buffer *buf, int c)
         if (buf->len == buf->cap && bufreserve(buf, 1) == -1)
                 return -1;
 
-        buf->data[buf->len++] = (unsigned char)c;
+        buf->data[buf->len++] = c;
         return 0;
-}
-
-static int bufprintf(Buffer *buf, const char *fmt, ...)
-{
-        va_list ap;
-        size_t prilen;
-
-        if (buf->len == buf->cap && bufreserve(buf, 1) == -1)
-                return -1;
-
-        va_start(ap, fmt);
-        prilen = vsnprintf(buf->data, buf->cap - buf->len, fmt, ap);
-        va_end(ap);
-
-        if (prilen >= buf->cap - buf->len) {
-                if (bufreserve(buf, prilen + 1) == -1)
-                        return -1;
-
-                va_start(ap, fmt);
-                prilen = vsnprintf(buf->data, buf->cap - buf->len, fmt, ap);
-                va_end(ap);
-        }
-
-        buf->len += prilen;
-        return prilen;
 }
 
 static int bufreserve(Buffer *buf, size_t n)
@@ -435,7 +411,9 @@ static void handlereq(int client)
                 return;
         }
 
-        conn->resp.status = hrecvreq(conn);
+        if ((conn->resp.status = hrecvreq(conn)) == 200) {
+                /* TODO */
+        }
 
         loghconn(conn);
         hclose(conn);
@@ -708,6 +686,68 @@ static void hparserange(HConn *conn, const char *value)
                 conn->req.range.start = start;
                 conn->req.range.end = end;
         }
+}
+
+static int hprintf(HConn *conn, const char *fmt, ...)
+{
+        Buffer  *buf = &conn->resp.content;
+        va_list  ap;
+        int      prilen;
+
+        if (buf->len == buf->cap && bufreserve(buf, 1) == -1)
+                return -1;
+
+        va_start(ap, fmt);
+        prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, ap);
+        va_end(ap);
+        if (prilen < 0)
+                return -1;
+
+        if ((unsigned int)prilen >= buf->cap - buf->len) {
+                if (bufreserve(buf, prilen + 1) == -1)
+                        return -1;
+
+                va_start(ap, fmt);
+                prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, ap);
+                va_end(ap);
+                if (prilen < 0)
+                        return -1;
+        }
+
+        buf->len += prilen;
+        return prilen;
+}
+
+static int haddheader(HConn *conn, const char *name, const char *value, ...)
+{
+        Buffer  *buf = &conn->resp.head;
+        va_list  ap;
+        int      prilen;
+
+        if (bufputs(buf, name) == -1)
+                return -1;
+        if (bufputs(buf, ": ") == -1)
+                return -1;
+
+        va_start(ap, value);
+        prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, value, ap);
+        va_end(ap);
+        if (prilen < 0)
+                return -1;
+
+        if ((unsigned int)prilen >= buf->cap - buf->len) {
+                if (bufreserve(buf, prilen + 1) == -1)
+                        return -1;
+
+                va_start(ap, value);
+                prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, value, ap);
+                va_end(ap);
+                if (prilen < 0)
+                        return -1;
+        }
+
+        buf->len += prilen;
+        return bufputs(buf, "\r\n");
 }
 
 static char *percentdec(char *s)
