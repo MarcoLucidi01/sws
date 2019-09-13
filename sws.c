@@ -97,7 +97,7 @@ struct HReq                             /* http request */
 struct HResp                            /* http response */
 {
         int             status;         /* response http status */
-        Buffer          head;           /* buffer for response line and headers */
+        Buffer          headers;        /* buffer for response headers */
         Buffer          content;        /* buffer for generated responses */
         FILE           *file;           /* file to send as response or NULL if sending generated response */
         size_t          sent;           /* number of bytes sent to client */
@@ -467,7 +467,7 @@ static HConn *hopen(int client)
 
         conn->req.uri = NULL;
         conn->resp.file = NULL;
-        bufinit(&conn->resp.head);
+        bufinit(&conn->resp.headers);
         bufinit(&conn->resp.content);
         bufinit(&conn->buf);
 
@@ -503,7 +503,7 @@ static void hclear(HConn *conn)
                 fclose(conn->resp.file);
         conn->resp.file = NULL;
 
-        bufclear(&conn->resp.head);
+        bufclear(&conn->resp.headers);
         bufclear(&conn->resp.content);
         bufclear(&conn->buf);
 }
@@ -511,7 +511,7 @@ static void hclear(HConn *conn)
 static void hclose(HConn *conn)
 {
         hclear(conn);   /* to free req.uri and close resp.file */
-        bufdeinit(&conn->resp.head);
+        bufdeinit(&conn->resp.headers);
         bufdeinit(&conn->resp.content);
         bufdeinit(&conn->buf);
         fclose(conn->in);
@@ -736,7 +736,7 @@ static int hprintf(HConn *conn, const char *fmt, ...)
 
 static int haddheader(HConn *conn, const char *name, const char *value, ...)
 {
-        Buffer  *buf = &conn->resp.head;
+        Buffer  *buf = &conn->resp.headers;
         va_list  ap, apcopy;
         int      ret;
 
