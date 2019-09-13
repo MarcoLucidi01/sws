@@ -115,6 +115,7 @@ struct HConn                            /* http connection */
 static void             bufinit(Buffer *);
 static int              bufputs(Buffer *, const char *s);
 static int              bufputc(Buffer *, int c);
+static int              bufvprintf(Buffer *, const char *fmt, va_list ap, va_list apcopy);
 static int              bufreserve(Buffer *, size_t n);
 static void             bufclear(Buffer *);
 static void             buftruncate(Buffer *, size_t newlen);
@@ -185,6 +186,34 @@ static int bufputc(Buffer *buf, int c)
 
         buf->data[buf->len++] = c;
         return 0;
+}
+
+/*
+ * In c89 we don't have va_copy, so we take 2 va_list started by the caller.
+ * Ugly but works.
+ */
+static int bufvprintf(Buffer *buf, const char *fmt, va_list ap, va_list apcopy)
+{
+        int prilen;
+
+        if (buf->len == buf->cap && bufreserve(buf, 1) == -1)
+                return -1;
+
+        prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, ap);
+        if (prilen < 0)
+                return -1;
+
+        if ((unsigned int)prilen >= buf->cap - buf->len) {
+                if (bufreserve(buf, prilen + 1) == -1)
+                        return -1;
+
+                prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, apcopy);
+                if (prilen < 0)
+                        return -1;
+        }
+
+        buf->len += prilen;
+        return prilen;
 }
 
 static int bufreserve(Buffer *buf, size_t n)
@@ -690,64 +719,37 @@ static void hparserange(HConn *conn, const char *value)
 
 static int hprintf(HConn *conn, const char *fmt, ...)
 {
-        Buffer  *buf = &conn->resp.content;
-        va_list  ap;
-        int      prilen;
-
-        if (buf->len == buf->cap && bufreserve(buf, 1) == -1)
-                return -1;
+        va_list ap, apcopy;
+        int     ret;
 
         va_start(ap, fmt);
-        prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, ap);
+        va_start(apcopy, fmt);
+        ret = bufvprintf(&conn->resp.content, fmt, ap, apcopy);
         va_end(ap);
-        if (prilen < 0)
-                return -1;
+        va_end(apcopy);
 
-        if ((unsigned int)prilen >= buf->cap - buf->len) {
-                if (bufreserve(buf, prilen + 1) == -1)
-                        return -1;
-
-                va_start(ap, fmt);
-                prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, ap);
-                va_end(ap);
-                if (prilen < 0)
-                        return -1;
-        }
-
-        buf->len += prilen;
-        return prilen;
+        return ret >= 0 ? 200 : 500;
 }
 
 static int haddheader(HConn *conn, const char *name, const char *value, ...)
 {
         Buffer  *buf = &conn->resp.head;
-        va_list  ap;
-        int      prilen;
+        va_list  ap, apcopy;
+        int      ret;
 
-        if (bufputs(buf, name) == -1)
-                return -1;
-        if (bufputs(buf, ": ") == -1)
-                return -1;
+        if (bufputs(buf, name) || bufputs(buf, ": ") == -1)
+                return 500;
 
         va_start(ap, value);
-        prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, value, ap);
+        va_start(apcopy, value);
+        ret = bufvprintf(buf, value, ap, apcopy);
         va_end(ap);
-        if (prilen < 0)
-                return -1;
+        va_end(apcopy);
 
-        if ((unsigned int)prilen >= buf->cap - buf->len) {
-                if (bufreserve(buf, prilen + 1) == -1)
-                        return -1;
+        if (ret < 0 || bufputs(buf, "\r\n") == -1)
+                return 500;
 
-                va_start(ap, value);
-                prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, value, ap);
-                va_end(ap);
-                if (prilen < 0)
-                        return -1;
-        }
-
-        buf->len += prilen;
-        return bufputs(buf, "\r\n");
+        return 200;
 }
 
 static char *percentdec(char *s)
