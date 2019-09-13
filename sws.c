@@ -117,6 +117,7 @@ static int              bufputs(Buffer *, const char *s);
 static int              bufputc(Buffer *, int c);
 static int              bufvprintf(Buffer *, const char *fmt, va_list ap, va_list apcopy);
 static int              bufreserve(Buffer *, size_t n);
+static size_t           bufavailable(Buffer *);
 static void             bufclear(Buffer *);
 static void             buftruncate(Buffer *, size_t newlen);
 static void             bufdeinit(Buffer *);
@@ -181,7 +182,7 @@ static int bufputs(Buffer *buf, const char *s)
 
 static int bufputc(Buffer *buf, int c)
 {
-        if (buf->len == buf->cap && bufreserve(buf, 1) == -1)
+        if (bufavailable(buf) == 0 && bufreserve(buf, 1) == -1)
                 return -1;
 
         buf->data[buf->len++] = c;
@@ -194,21 +195,20 @@ static int bufputc(Buffer *buf, int c)
  */
 static int bufvprintf(Buffer *buf, const char *fmt, va_list ap, va_list apcopy)
 {
+        char *p = buf->data + buf->len;
         int prilen;
 
-        if (buf->len == buf->cap && bufreserve(buf, 1) == -1)
+        if (bufavailable(buf) == 0 && bufreserve(buf, 1) == -1)
                 return -1;
 
-        prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, ap);
-        if (prilen < 0)
+        if ((prilen = vsnprintf(p, bufavailable(buf), fmt, ap)) < 0)
                 return -1;
 
-        if ((unsigned int)prilen >= buf->cap - buf->len) {
+        if ((unsigned int)prilen >= bufavailable(buf)) {
                 if (bufreserve(buf, prilen + 1) == -1)
                         return -1;
 
-                prilen = vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, apcopy);
-                if (prilen < 0)
+                if ((prilen = vsnprintf(p, bufavailable(buf), fmt, apcopy)) < 0)
                         return -1;
         }
 
@@ -218,22 +218,25 @@ static int bufvprintf(Buffer *buf, const char *fmt, va_list ap, va_list apcopy)
 
 static int bufreserve(Buffer *buf, size_t n)
 {
-        size_t available, newcap;
+        size_t newcap;
         char *p;
 
-        available = buf->cap - buf->len;
-        if (available >= n)
+        if (bufavailable(buf) >= n)
                 return 0;
 
-        newcap = buf->cap + MAX(BUFCHUNK, (n - available));
+        newcap = buf->cap + MAX(BUFCHUNK, (n - bufavailable(buf)));
 
-        p = realloc(buf->data, newcap);
-        if ( ! p)
+        if ( ! (p = realloc(buf->data, newcap)))
                 return -1;
 
         buf->cap = newcap;
         buf->data = p;
         return 0;
+}
+
+static size_t bufavailable(Buffer *buf)
+{
+        return buf->cap - buf->len;
 }
 
 static void bufclear(Buffer *buf)
