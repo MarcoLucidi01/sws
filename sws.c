@@ -195,20 +195,19 @@ static int bufputc(Buffer *buf, int c)
  */
 static int bufvprintf(Buffer *buf, const char *fmt, va_list ap, va_list apcopy)
 {
-        char *p = buf->data + buf->len;
         int prilen;
 
         if (bufavailable(buf) == 0 && bufreserve(buf, 1) == -1)
                 return -1;
 
-        if ((prilen = vsnprintf(p, bufavailable(buf), fmt, ap)) < 0)
+        if ((prilen = vsnprintf(buf->data + buf->len, bufavailable(buf), fmt, ap)) < 0)
                 return -1;
 
         if ((unsigned int)prilen >= bufavailable(buf)) {
                 if (bufreserve(buf, prilen + 1) == -1)
                         return -1;
 
-                if ((prilen = vsnprintf(p, bufavailable(buf), fmt, apcopy)) < 0)
+                if ((prilen = vsnprintf(buf->data + buf->len, bufavailable(buf), fmt, apcopy)) < 0)
                         return -1;
         }
 
