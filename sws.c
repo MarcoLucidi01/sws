@@ -33,6 +33,7 @@
 #define URIMAX          8192            /* request uri max size */
 #define HEADERMAX       4096            /* single request header max size */
 #define MAXHEADERS      100             /* max number of request headers allowed */
+#define HDATEFMT        "%a, %d %b %Y %H:%M:%S GMT"     /* http date format for strftime */
 #define BUFCHUNK        256             /* minimum buffer capacity increment */
 
 #define ARRAYLEN(a)     (sizeof((a)) / sizeof((a)[0]))
@@ -147,6 +148,7 @@ static void             hparserange(HConn *, const char *value);
 static int              hprintf(HConn *, const char *fmt, ...);
 static int              haddheader(HConn *, const char *name, const char *value, ...);
 static char            *percentdec(char *);
+static char            *time2hdate(time_t time, char *buf, size_t size);
 static void             loghconn(const HConn *);
 static char            *strtrim(char *s);
 static const char      *strstatus(int);
@@ -771,6 +773,12 @@ static char *percentdec(char *s)
 
         *d = '\0';
         return s;
+}
+
+static char *time2hdate(time_t time, char *buf, size_t size)
+{
+        strftime(buf, size, HDATEFMT, gmtime(&time));;
+        return buf;
 }
 
 static void loghconn(const HConn *conn)
