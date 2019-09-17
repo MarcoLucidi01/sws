@@ -12,6 +12,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -145,6 +146,9 @@ static int              hparsercmp(const void *name, const void *parser);
 static void             hparseconnection(HConn *, const char *value);
 static void             hparsecontentlen(HConn *, const char *value);
 static void             hparserange(HConn *, const char *value);
+static int              hbuildresp(HConn *);
+static int              hresperr(HConn *, int errstatus);
+static int              hrespfile(HConn *, const char *path, const struct stat *);
 static int              hprintf(HConn *, const char *fmt, ...);
 static int              haddheader(HConn *, const char *name, const char *value, ...);
 static char            *percentdec(char *);
@@ -444,10 +448,8 @@ static void handlereq(int client)
                 return;
         }
 
-        if ((conn->resp.status = hrecvreq(conn)) == 200) {
-                /* TODO */
-        }
-
+        hrecvreq(conn);
+        hbuildresp(conn);
         loghconn(conn);
         hclose(conn);
 }
@@ -535,6 +537,7 @@ static int hrecvreq(HConn *conn)
         ||  (ret = hparseheaders(conn)) != 200) {
         }
 
+        conn->resp.status = ret;
         return ret;
 }
 
@@ -719,6 +722,68 @@ static void hparserange(HConn *conn, const char *value)
                 conn->req.range.start = start;
                 conn->req.range.end = end;
         }
+}
+
+static int hbuildresp(HConn *conn)
+{
+        struct stat finfo;
+        const char *relpath;
+
+        if (conn->resp.status != 200)
+                return hresperr(conn, conn->resp.status);
+
+        relpath = strtrim(conn->req.uri);
+
+        if (relpath[0] == '.' || strstr(relpath, "/."))
+                return hresperr(conn, 404);
+
+        for (; *relpath == '/'; relpath++)
+                ;
+        if (*relpath == '\0')
+                relpath = "./";
+
+        if (lstat(relpath, &finfo) == -1)
+                return hresperr(conn, 404);
+
+        if (S_ISREG(finfo.st_mode))
+                return hrespfile(conn, relpath, &finfo);
+        else if (S_ISDIR(finfo.st_mode)) {
+                /* TODO hrespdir */
+        }
+
+        return hresperr(conn, 403);
+}
+
+static int hresperr(HConn *conn, int errstatus)
+{
+        bufclear(&conn->resp.content);
+        bufclear(&conn->resp.headers);
+
+        hprintf(conn, "<!DOCTYPE html><title>%d %s</title><h1>%d %s</h1>",
+                errstatus, strstatus(errstatus), errstatus, strstatus(errstatus));
+
+        haddheader(conn, "Content-Type", "text/html");
+
+        conn->resp.status = errstatus;
+        return errstatus;
+}
+
+static int hrespfile(HConn *conn, const char *path, const struct stat *finfo)
+{
+        char hdate[32];
+        FILE *f = fopen(path, "r");
+
+        if ( ! f)
+                return hresperr(conn, 404);
+
+        haddheader(conn, "Accept-Ranges", "bytes");
+        haddheader(conn, "Last-Modified", "%s", time2hdate(finfo->st_mtime, hdate, sizeof(hdate)));
+        /* TODO parsemime
+           haddheader(conn, "Content-Type", "%s", parsemime(path)); */
+
+        conn->resp.file = f;
+        conn->resp.status = 200;
+        return 200;
 }
 
 static int hprintf(HConn *conn, const char *fmt, ...)
