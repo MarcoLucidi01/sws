@@ -39,6 +39,7 @@
 
 #define ARRAYLEN(a)     (sizeof((a)) / sizeof((a)[0]))
 #define MAX(a, b)       ((a) > (b) ? (a) : (b))
+#define ISASCII(c)      ((c) > 0 && (c) < 128)
 
 typedef struct Buffer   Buffer;
 typedef struct Args     Args;
@@ -47,6 +48,7 @@ typedef struct HRange   HRange;
 typedef struct HReq     HReq;
 typedef struct HResp    HResp;
 typedef struct HConn    HConn;
+typedef struct MimeType MimeType;
 
 struct Buffer                           /* autogrowing characters buffer */
 {
@@ -114,6 +116,12 @@ struct HConn                            /* http connection */
         Buffer          buf;            /* common buffer used e.g. for building file paths */
 };
 
+struct MimeType
+{
+        const char     *ext;            /* file extension */
+        const char     *mime;           /* mime type string */
+};
+
 static void             bufinit(Buffer *);
 static int              bufputs(Buffer *, const char *s);
 static int              bufputc(Buffer *, int c);
@@ -153,6 +161,8 @@ static int              hprintf(HConn *, const char *fmt, ...);
 static int              haddheader(HConn *, const char *name, const char *value, ...);
 static char            *percentdec(char *);
 static char            *time2hdate(time_t time, char *buf, size_t size);
+static const char      *parsemime(const char *path, FILE *f);
+static int              mimetypecmp(const void *ext, const void *mimetype);
 static void             loghconn(const HConn *);
 static char            *strtrim(char *s);
 static const char      *strstatus(int);
@@ -161,11 +171,85 @@ static void             vlogerr(const char *fmt, va_list ap);
 static void             die(const char *reason, ...);
 static void             cleanup(void);
 
-static HParser hparsers[] =      /* keep sorted */
+static HParser hparsers[] =     /* keep sorted */
 {
         { "connection",         hparseconnection },
         { "content-length",     hparsecontentlen },
         { "range",              hparserange      },
+};
+
+static MimeType mimetypes[] =   /* keep sorted by extension */
+{
+        { "3g2",        "video/3gpp2" },
+        { "3gp",        "video/3gpp" },
+        { "7z",         "application/x-7z-compressed" },
+        { "aac",        "audio/aac" },
+        { "abw",        "application/x-abiword" },
+        { "arc",        "application/x-freearc" },
+        { "avi",        "video/avi" },
+        { "bin",        "application/octet-stream" },
+        { "bmp",        "image/bmp" },
+        { "bz",         "application/x-bzip" },
+        { "bz2",        "application/x-bzip2" },
+        { "csh",        "application/x-csh" },
+        { "css",        "text/css" },
+        { "csv",        "text/csv" },
+        { "doc",        "application/msword" },
+        { "docx",       "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+        { "epub",       "application/epub+zip" },
+        { "gif",        "image/gif" },
+        { "gz",         "application/gzip" },
+        { "htm",        "text/html" },
+        { "html",       "text/html" },
+        { "ico",        "image/vnd.microsoft.icon" },
+        { "ics",        "text/calendar" },
+        { "jar",        "application/java-archive" },
+        { "jpeg",       "image/jpeg" },
+        { "jpg",        "image/jpeg" },
+        { "js",         "application/javascript" },
+        { "json",       "application/json" },
+        { "jsonld",     "application/ld+json" },
+        { "mid",        "audio/midi" },
+        { "midi",       "audio/midi" },
+        { "mjs",        "application/javascript" },
+        { "mp3",        "audio/mpeg" },
+        { "mp4",        "video/mpeg" },
+        { "mpeg",       "video/mpeg" },
+        { "odp",        "application/vnd.oasis.opendocument.presentation" },
+        { "ods",        "application/vnd.oasis.opendocument.spreadsheet" },
+        { "odt",        "application/vnd.oasis.opendocument.text" },
+        { "oga",        "audio/ogg" },
+        { "ogv",        "video/ogg" },
+        { "ogx",        "application/ogg" },
+        { "otf",        "font/otf" },
+        { "pdf",        "application/pdf" },
+        { "php",        "application/php" },
+        { "png",        "image/png" },
+        { "ppt",        "application/vnd.ms-powerpoint" },
+        { "pptx",       "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+        { "rar",        "application/x-rar-compressed" },
+        { "rtf",        "application/rtf" },
+        { "sh",         "application/x-sh" },
+        { "svg",        "image/svg+xml" },
+        { "swf",        "application/x-shockwave-flash" },
+        { "tar",        "application/x-tar" },
+        { "tif",        "image/tiff" },
+        { "tiff",       "image/tiff" },
+        { "ts",         "video/mp2t" },
+        { "ttf",        "font/ttf" },
+        { "txt",        "text/plain" },
+        { "vsd",        "application/vnd.visio" },
+        { "wav",        "audio/wav" },
+        { "weba",       "audio/webm" },
+        { "webm",       "video/webm" },
+        { "webp",       "image/webp" },
+        { "woff",       "font/woff" },
+        { "woff2",      "font/woff2" },
+        { "xhtml",      "application/xhtml+xml" },
+        { "xls",        "application/vnd.ms-excel" },
+        { "xlsx",       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+        { "xml",        "application/xml" },
+        { "zip",        "application/zip" },
 };
 
 static struct Server server;            /* global server informations */
@@ -778,8 +862,7 @@ static int hrespfile(HConn *conn, const char *path, const struct stat *finfo)
 
         haddheader(conn, "Accept-Ranges", "bytes");
         haddheader(conn, "Last-Modified", "%s", time2hdate(finfo->st_mtime, hdate, sizeof(hdate)));
-        /* TODO parsemime
-           haddheader(conn, "Content-Type", "%s", parsemime(path)); */
+        haddheader(conn, "Content-Type", "%s", parsemime(path, f));
 
         conn->resp.file = f;
         conn->resp.status = 200;
@@ -844,6 +927,30 @@ static char *time2hdate(time_t time, char *buf, size_t size)
 {
         strftime(buf, size, HDATEFMT, gmtime(&time));;
         return buf;
+}
+
+static const char *parsemime(const char *path, FILE *f)
+{
+        const char *ext = strrchr(path, '.');
+        MimeType *m;
+        char buf[256];
+        size_t n, i;
+
+        if (ext && (m = bsearch(++ext, mimetypes, ARRAYLEN(mimetypes), sizeof(*mimetypes), mimetypecmp)))
+                return m->mime;
+
+        n = fread(buf, sizeof(*buf), sizeof(buf), f);
+        rewind(f);
+        for (i = 0; i < n; i++)
+                if ( ! ISASCII(buf[i]))
+                        return "application/octet-stream";
+
+        return "text/plain";
+}
+
+static int mimetypecmp(const void *ext, const void *mimetype)
+{
+        return strcasecmp((const char *)ext, ((const MimeType *)mimetype)->ext);
 }
 
 static void loghconn(const HConn *conn)
