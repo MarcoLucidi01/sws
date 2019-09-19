@@ -160,6 +160,7 @@ static int              hrespfile(HConn *, const char *path, const struct stat *
 static int              hprintf(HConn *, const char *fmt, ...);
 static int              haddheader(HConn *, const char *name, const char *value, ...);
 static char            *percentdec(char *);
+static char            *percentenc(const char *, char *buf, size_t size);
 static char            *time2hdate(time_t time, char *buf, size_t size);
 static const char      *parsemime(const char *path, FILE *f);
 static int              mimetypecmp(const void *ext, const void *mimetype);
@@ -921,6 +922,38 @@ static char *percentdec(char *s)
 
         *d = '\0';
         return s;
+}
+
+static char *percentenc(const char *s, char *buf, size_t size)
+{
+        unsigned char c, tmp;
+        size_t i = 0;
+
+        while (*s && i < size - 1) {
+                c = *s++;
+
+                if ((c >= 'A' && c <= 'Z')
+                ||  (c >= 'a' && c <= 'z')
+                ||  (c >= '0' && c <= '9')
+                ||  strchr(";,/?:@&=+$-_.!~*'()#", c))
+                        buf[i++] = c;
+                else {
+                        buf[i++] = '%';
+
+                        if (i == size - 1)
+                                break;
+                        tmp = c >> 0x04;
+                        buf[i++] = (tmp < 10) ? ('0' + tmp) : ('A' + tmp - 10);
+
+                        if (i == size - 1)
+                                break;
+                        tmp = c & 0x0F;
+                        buf[i++] = (tmp < 10) ? ('0' + tmp) : ('A' + tmp - 10);
+                }
+        }
+
+        buf[i] = '\0';
+        return buf;
 }
 
 static char *time2hdate(time_t time, char *buf, size_t size)
