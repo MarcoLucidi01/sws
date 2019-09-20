@@ -2,6 +2,7 @@
 
 #include <arpa/inet.h>
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <getopt.h>
 #include <netdb.h>
@@ -157,6 +158,10 @@ static void             hparserange(HConn *, const char *value);
 static int              hbuildresp(HConn *);
 static int              hresperr(HConn *, int errstatus);
 static int              hrespfile(HConn *, const char *path, const struct stat *);
+static int              hrespdir(HConn *, const char *path);
+static int              scandirfilter(const struct dirent *entry);
+static int              scandircmp(const struct dirent **a, const struct dirent **b);
+static int              hrespdirlist(HConn *, const char *path, struct dirent **, int n);
 static int              hprintf(HConn *, const char *fmt, ...);
 static int              haddheader(HConn *, const char *name, const char *value, ...);
 static char            *percentdec(char *);
@@ -833,7 +838,7 @@ static int hbuildresp(HConn *conn)
         if (S_ISREG(finfo.st_mode))
                 return hrespfile(conn, relpath, &finfo);
         else if (S_ISDIR(finfo.st_mode)) {
-                /* TODO hrespdir */
+                return hrespdir(conn, relpath);
         }
 
         return hresperr(conn, 403);
@@ -841,9 +846,6 @@ static int hbuildresp(HConn *conn)
 
 static int hresperr(HConn *conn, int errstatus)
 {
-        bufclear(&conn->resp.content);
-        bufclear(&conn->resp.headers);
-
         hprintf(conn, "<!DOCTYPE html><title>%d %s</title><h1>%d %s</h1>",
                 errstatus, strstatus(errstatus), errstatus, strstatus(errstatus));
 
@@ -867,6 +869,115 @@ static int hrespfile(HConn *conn, const char *path, const struct stat *finfo)
 
         conn->resp.file = f;
         conn->resp.status = 200;
+        return 200;
+}
+
+static int hrespdir(HConn *conn, const char *path)
+{
+        Buffer *buf = &conn->buf;
+        size_t pathlen = strlen(path);
+        struct stat finfo;
+        struct dirent **entries;
+        int n, ret;
+
+        /*
+         * redirect if directory path doesn't end with /
+         */
+
+        if (path[pathlen - 1] != '/') {
+                if (bufreserve(buf, pathlen * 3 + 1) == -1)
+                        return hresperr(conn, 500);
+
+                haddheader(conn, "Location", "/%s/", percentenc(path, buf->data, buf->cap));
+                return hresperr(conn, 301);
+        }
+
+        /*
+         * try index file
+         */
+
+        bufclear(buf);
+        if (bufputs(buf, path) == -1
+        ||  bufputs(buf, server.index) == -1
+        ||  bufputc(buf, '\0') == -1)
+                return hresperr(conn, 500);
+
+        if (lstat(buf->data, &finfo) == 0 && S_ISREG(finfo.st_mode))
+                return hrespfile(conn, buf->data, &finfo);
+
+        /*
+         * directory listing
+         */
+
+        if ((n = scandir(path, &entries, scandirfilter, scandircmp)) == -1)
+                return hresperr(conn, 404);
+
+        ret = hrespdirlist(conn, path, entries, n);
+
+        while (n--)
+                free(entries[n]);
+        free(entries);
+
+        return ret;
+}
+
+static int scandirfilter(const struct dirent *entry)
+{
+        return entry->d_name[0] != '.';
+}
+
+static int scandircmp(const struct dirent **a, const struct dirent **b)
+{
+        return strcasecmp((*a)->d_name, (*b)->d_name);
+}
+
+static int hrespdirlist(HConn *conn, const char *path, struct dirent **entries, int n)
+{
+        Buffer *buf = &conn->buf;
+        struct stat finfo;
+        char mtime[32];
+        const char *fname, *fmt;
+        const char *title = strcmp(path, "./") == 0 ? "" : path;
+        int i;
+
+        hprintf(conn, "<!DOCTYPE html><style>"
+                      "table { border-collapse: collapse; }"
+                      "td { border: 1px solid #ddd; padding: 10px; }"
+                      "tr:nth-child(odd) { background-color: #f2f2f2; }"
+                      "td:nth-child(3) { text-align: right }"
+                      "a { text-decoration: none }"
+                      "</style><title>/%s</title><h1>/%s</h1><table>\n",
+                      title, title);
+
+        for (i = 0; i < n; i++) {
+                fname = entries[i]->d_name;
+
+                bufclear(buf);
+                bufputs(buf, path);
+                bufputs(buf, fname);
+                bufputc(buf, '\0');
+
+                if (lstat(buf->data, &finfo) == -1)
+                        continue;
+
+                if (S_ISREG(finfo.st_mode))
+                        fmt = "<tr><td><a href=\"%s\">%s</a></td><td>%s</td><td>%d</td></tr>\n";
+                else if (S_ISDIR(finfo.st_mode))
+                        fmt = "<tr><td><a href=\"%s/\"><b>%s/</b></a></td><td>%s</td><td>%d</td></tr>\n";
+                else if (S_ISLNK(finfo.st_mode))
+                        fmt = "<tr><td><a href=\"%s\">%s@</a></td><td>%s</td><td>%d</td></tr>\n";
+                else
+                        continue;
+
+                if (bufreserve(buf, strlen(fname) * 3 + 1) == -1)
+                        continue;
+
+                strftime(mtime, sizeof(mtime), "%Y-%m-%d %H:%M:%S %Z", localtime(&finfo.st_mtime));
+                hprintf(conn, fmt, percentenc(fname, buf->data, buf->cap), fname, mtime, (long)finfo.st_size);
+        }
+        hprintf(conn, "</table>\n");
+
+        haddheader(conn, "Content-Type", "%s", "text/html");
         return 200;
 }
 
