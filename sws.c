@@ -40,6 +40,7 @@
 
 #define ARRAYLEN(a)     (sizeof((a)) / sizeof((a)[0]))
 #define MAX(a, b)       ((a) > (b) ? (a) : (b))
+#define MIN(a, b)       ((a) < (b) ? (a) : (b))
 #define ISASCII(c)      ((c) > 0 && (c) < 128)
 
 typedef struct Buffer   Buffer;
@@ -105,7 +106,8 @@ struct HResp                            /* http response */
         Buffer          headers;        /* buffer for response headers */
         Buffer          content;        /* buffer for generated responses */
         FILE           *file;           /* file to send as response or NULL if sending generated response */
-        size_t          sent;           /* number of bytes sent to client */
+        long            filesize;       /* size of resp.file taken from stat */
+        size_t          sent;           /* number of payload bytes sent to client */
 };
 
 struct HConn                            /* http connection */
@@ -162,6 +164,8 @@ static int              hrespdir(HConn *, const char *path);
 static int              scandirfilter(const struct dirent *entry);
 static int              scandircmp(const struct dirent **a, const struct dirent **b);
 static int              hrespdirlist(HConn *, const char *path, struct dirent **, int n);
+static int              hsendresp(HConn *);
+static int              fixhrange(HRange *, unsigned long contentlen);
 static int              hprintf(HConn *, const char *fmt, ...);
 static int              haddheader(HConn *, const char *name, const char *value, ...);
 static char            *percentdec(char *);
@@ -455,7 +459,8 @@ static void setupsighandler(void)
 
         if (sigaction(SIGINT,  &sa, NULL) == -1
         ||  sigaction(SIGTERM, &sa, NULL) == -1
-        ||  sigaction(SIGCHLD, &sa, NULL) == -1)
+        ||  sigaction(SIGCHLD, &sa, NULL) == -1
+        ||  sigaction(SIGPIPE, &sa, NULL) == -1)
                 die("sigaction: %s", strerror(errno));
 }
 
@@ -469,6 +474,13 @@ static void sighandler(int sig)
         case SIGCHLD:
                 while (waitpid(-1, NULL, WNOHANG) > 0)
                         ;
+                break;
+        case SIGPIPE:
+                /*
+                 * SIGPIPE is raised when a client prematurely closes the
+                 * connection. The default behavior is to terminate the process,
+                 * so we ignore it!
+                 */
                 break;
         }
 }
@@ -532,14 +544,25 @@ static void run(void)
 
 static void handlereq(int client)
 {
+        /*
+         * TODO set sock timeout
+         */
+
         HConn *conn = hopen(client);
         if ( ! conn) {
                 logerr("cannot open http connection");
                 return;
         }
 
+        /*
+         * TODO keep-alive
+         *
+         * TODO check if timeout in keep-alive loop
+         */
+
         hrecvreq(conn);
         hbuildresp(conn);
+        hsendresp(conn);
         loghconn(conn);
         hclose(conn);
 }
@@ -588,6 +611,7 @@ static void hclear(HConn *conn)
         conn->req.contentlen  = -1;
         conn->resp.status     = 500;
         conn->resp.sent       = 0;
+        conn->resp.filesize   = -1;
 
         free(conn->req.uri);
         conn->req.uri = NULL;
@@ -868,6 +892,7 @@ static int hrespfile(HConn *conn, const char *path, const struct stat *finfo)
         haddheader(conn, "Content-Type", "%s", parsemime(path, f));
 
         conn->resp.file = f;
+        conn->resp.filesize = finfo->st_size;
         conn->resp.status = 200;
         return 200;
 }
@@ -979,6 +1004,78 @@ static int hrespdirlist(HConn *conn, const char *path, struct dirent **entries, 
 
         haddheader(conn, "Content-Type", "%s", "text/html");
         return 200;
+}
+
+static int hsendresp(HConn *conn)
+{
+        unsigned long contentlen, tosend, n;
+        char hdate[32], *p;
+        HRange *range;
+        HReq *req = &conn->req;
+        HResp *resp = &conn->resp;
+        Buffer *buf = &conn->buf;
+
+        contentlen = resp->file ? (unsigned long)resp->filesize : (unsigned long)resp->content.len;
+
+        range = (req->range.start != -1 || req->range.end != -1) ? &req->range : NULL;
+        if (resp->status == 200 && range && fixhrange(range, contentlen) == 0) {
+                haddheader(conn, "Content-Range", "bytes %ld-%ld/%lu", range->start, range->end, contentlen);
+                contentlen = range->end - range->start + 1;
+                resp->status = 206;
+        }
+
+        haddheader(conn, "Connection", "close" /* TODO req->keepalive ? "keep-alive" : "close" */ );
+        haddheader(conn, "Content-Length", "%lu", contentlen);
+        haddheader(conn, "Date", "%s", time2hdate(time(NULL), hdate, sizeof(hdate)));
+        haddheader(conn, "Server", "sws " VERSION);
+
+        /*
+         * response head
+         */
+
+        fprintf(conn->out, "HTTP/1.0 %d %s\r\n", resp->status, strstatus(resp->status));
+        fwrite(resp->headers.data, 1, resp->headers.len, conn->out);
+        fputs("\r\n", conn->out);
+
+        if (strcmp("HEAD", req->method) == 0)
+                return resp->status;
+
+        /*
+         * error or generated response
+         */
+
+        if ((resp->status != 200 && resp->status != 206) || ! resp->file) {
+                p = resp->status == 206 ? resp->content.data + range->start : resp->content.data;
+                resp->sent = fwrite(p, 1, contentlen, conn->out);
+                return resp->status;
+        }
+
+        /*
+         * file response
+         */
+
+        if (resp->status == 206)
+                fseek(resp->file, range->start, SEEK_SET);
+
+        tosend = contentlen;
+        resp->sent = 0;
+        bufreserve(buf, MIN(tosend, BUFSIZ));
+        while (tosend && ! ferror(resp->file) && ! feof(resp->file) && ! ferror(conn->out) && ! feof(conn->out)) {
+                n = fread(buf->data, 1, MIN(tosend, buf->cap), resp->file);
+                n = fwrite(buf->data, 1, n, conn->out);
+                tosend -= n;
+                resp->sent += n;
+        }
+
+        return resp->status;
+}
+
+static int fixhrange(HRange *range, unsigned long contentlen)
+{
+        /* TODO */
+        (void)range;
+        (void)contentlen;
+        return -1;
 }
 
 static int hprintf(HConn *conn, const char *fmt, ...)
