@@ -165,7 +165,7 @@ static int              scandirfilter(const struct dirent *entry);
 static int              scandircmp(const struct dirent **a, const struct dirent **b);
 static int              hrespdirlist(HConn *, const char *path, struct dirent **, int n);
 static int              hsendresp(HConn *);
-static int              fixhrange(HRange *, unsigned long contentlen);
+static int              fixhrange(HRange *, long contentlen);
 static int              hprintf(HConn *, const char *fmt, ...);
 static int              haddheader(HConn *, const char *name, const char *value, ...);
 static char            *percentdec(char *);
@@ -1020,7 +1020,7 @@ static int hsendresp(HConn *conn)
         range = (req->range.start != -1 || req->range.end != -1) ? &req->range : NULL;
         if (resp->status == 200 && range && fixhrange(range, contentlen) == 0) {
                 haddheader(conn, "Content-Range", "bytes %ld-%ld/%lu", range->start, range->end, contentlen);
-                contentlen = range->end - range->start + 1;
+                contentlen = range->end - range->start;
                 resp->status = 206;
         }
 
@@ -1070,12 +1070,27 @@ static int hsendresp(HConn *conn)
         return resp->status;
 }
 
-static int fixhrange(HRange *range, unsigned long contentlen)
+static int fixhrange(HRange *range, long contentlen)
 {
-        /* TODO */
-        (void)range;
-        (void)contentlen;
-        return -1;
+        long start = range->start;
+        long end = range->end;
+
+        if (start == -1 && end == -1)
+                return 0;
+
+        if (start != -1)
+                end = end != -1 ? MIN(contentlen, end + 1) : contentlen;
+        else {
+                start = contentlen - end;
+                end = contentlen;
+        }
+
+        if (start < 0 || start > end)
+                return -1;
+
+        range->start = start;
+        range->end = end;
+        return 0;
 }
 
 static int hprintf(HConn *conn, const char *fmt, ...)
