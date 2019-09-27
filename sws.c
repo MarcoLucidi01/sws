@@ -14,6 +14,7 @@
 #include <strings.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -31,6 +32,8 @@
 #define DEFAULTPORT     "8080"
 #define DEFAULTBACKLOG  10
 #define DEFAULTINDEX    "index.html"
+#define CONNTIMEOUT     30              /* seconds a connection is allowed to remain in idle */
+#define CONNMAXREQS     200             /* max number of requests allowed on a single connection */
 #define METHODMAX       8               /* request method max size */
 #define URIMAX          8192            /* request uri max size */
 #define HEADERMAX       4096            /* single request header max size */
@@ -114,6 +117,7 @@ struct HConn                            /* http connection */
 {
         FILE           *in;             /* input stream */
         FILE           *out;            /* output stream */
+        int             reqsleft;       /* number of remaining requests allowed on this connection */
         HReq            req;
         HResp           resp;
         Buffer          buf;            /* common buffer used e.g. for building file paths */
@@ -144,9 +148,11 @@ static void             logsrvinfo(void);
 static void             ssinetntop(const struct sockaddr_storage *, char *address, char *port);
 static void             run(void);
 static void             handlereq(int client);
+static int              setsocktimeout(int, time_t);
 static HConn           *hopen(int client);
 static void             hclear(HConn *);
 static void             hclose(HConn *);
+static int              isalive(HConn *);
 static int              hrecvreq(HConn *);
 static int              hparsemethod(HConn *);
 static int              hparseuri(HConn *);
@@ -544,27 +550,47 @@ static void run(void)
 
 static void handlereq(int client)
 {
-        /*
-         * TODO set sock timeout
-         */
+        HConn *conn;
 
-        HConn *conn = hopen(client);
-        if ( ! conn) {
+        if (setsocktimeout(client, CONNTIMEOUT) == -1) {
+                logerr("setsocktimeout: %s", strerror(errno));
+                return;
+        }
+        if ( ! (conn = hopen(client))) {
                 logerr("cannot open http connection");
                 return;
         }
 
-        /*
-         * TODO keep-alive
-         *
-         * TODO check if timeout in keep-alive loop
-         */
+        do {
+                hclear(conn);
+                hrecvreq(conn);
 
-        hrecvreq(conn);
-        hbuildresp(conn);
-        hsendresp(conn);
-        loghconn(conn);
+                if ( ! isalive(conn))
+                        break;          /* client disconnected, don't bother go on */
+
+                conn->reqsleft--;
+                hbuildresp(conn);
+                hsendresp(conn);
+                fflush(conn->out);
+                loghconn(conn);
+
+        } while (conn->req.keepalive && conn->reqsleft > 0);
+
         hclose(conn);
+}
+
+static int setsocktimeout(int sock, time_t sec)
+{
+        struct timeval timeout;
+
+        timeout.tv_sec  = sec;
+        timeout.tv_usec = 0;
+
+        if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0
+        &&  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) == 0)
+                return 0;
+
+        return -1;
 }
 
 static HConn *hopen(int client)
@@ -581,6 +607,7 @@ static HConn *hopen(int client)
         if ( ! (conn->out = fdopen(outfd, "w")))
                 goto errout;
 
+        conn->reqsleft = CONNMAXREQS;
         conn->req.uri = NULL;
         conn->resp.file = NULL;
         bufinit(&conn->resp.headers);
@@ -634,6 +661,11 @@ static void hclose(HConn *conn)
         fclose(conn->in);
         fclose(conn->out);
         free(conn);
+}
+
+static int isalive(HConn *conn)
+{
+        return ! feof(conn->in) && ! ferror(conn->in) && ! feof(conn->out) && ! ferror(conn->out);
 }
 
 static int hrecvreq(HConn *conn)
@@ -1024,7 +1056,12 @@ static int hsendresp(HConn *conn)
                 resp->status = 206;
         }
 
-        haddheader(conn, "Connection", "close" /* TODO req->keepalive ? "keep-alive" : "close" */ );
+        if (req->keepalive && conn->reqsleft > 0) {
+                haddheader(conn, "Connection", "keep-alive");
+                haddheader(conn, "Keep-Alive", "timeout=%d, max=%d", CONNTIMEOUT, conn->reqsleft);
+        } else
+                haddheader(conn, "Connection", "close");
+
         haddheader(conn, "Content-Length", "%lu", contentlen);
         haddheader(conn, "Date", "%s", time2hdate(time(NULL), hdate, sizeof(hdate)));
         haddheader(conn, "Server", "sws " VERSION);
