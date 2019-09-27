@@ -1018,11 +1018,11 @@ static int hrespdirlist(HConn *conn, const char *path, struct dirent **entries, 
                         continue;
 
                 if (S_ISREG(finfo.st_mode))
-                        fmt = "<tr><td><a href=\"%s\">%s</a></td><td>%s</td><td>%d</td></tr>\n";
+                        fmt = "<tr><td><a href=\"%s\">%s</a></td><td>%s</td><td>%ld</td></tr>\n";
                 else if (S_ISDIR(finfo.st_mode))
-                        fmt = "<tr><td><a href=\"%s/\"><b>%s/</b></a></td><td>%s</td><td>%d</td></tr>\n";
+                        fmt = "<tr><td><a href=\"%s/\"><b>%s/</b></a></td><td>%s</td><td>%ld</td></tr>\n";
                 else if (S_ISLNK(finfo.st_mode))
-                        fmt = "<tr><td><a href=\"%s\">%s@</a></td><td>%s</td><td>%d</td></tr>\n";
+                        fmt = "<tr><td><a href=\"%s\">%s@</a></td><td>%s</td><td>%ld</td></tr>\n";
                 else
                         continue;
 
