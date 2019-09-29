@@ -140,6 +140,7 @@ static void             buftruncate(Buffer *, size_t newlen);
 static void             bufdeinit(Buffer *);
 static void             parseargs(Args *, int argc, char *const *argv);
 static void             initsrv(const Args *);
+static void             setuputctz(void);
 static void             setupsock(const Args *);
 static void             setuprootpath(const Args *);
 static void             setupsighandler(void);
@@ -162,6 +163,7 @@ static HParser         *findhparser(const char *name);
 static int              hparsercmp(const void *name, const void *parser);
 static void             hparseconnection(HConn *, const char *value);
 static void             hparsecontentlen(HConn *, const char *value);
+static void             hparseifmodsince(HConn *, const char *value);
 static void             hparserange(HConn *, const char *value);
 static int              hbuildresp(HConn *);
 static int              hresperr(HConn *, int errstatus);
@@ -177,6 +179,7 @@ static int              haddheader(HConn *, const char *name, const char *value,
 static char            *percentdec(char *);
 static char            *percentenc(const char *, char *buf, size_t size);
 static char            *time2hdate(time_t time, char *buf, size_t size);
+static time_t           hdate2time(const char *);
 static const char      *parsemime(const char *path, FILE *f);
 static int              mimetypecmp(const void *ext, const void *mimetype);
 static void             loghconn(const HConn *);
@@ -191,6 +194,7 @@ static HParser hparsers[] =     /* keep sorted */
 {
         { "connection",         hparseconnection },
         { "content-length",     hparsecontentlen },
+        { "if-modified-since",  hparseifmodsince },
         { "range",              hparserange      },
 };
 
@@ -390,10 +394,18 @@ static void parseargs(Args *args, int argc, char *const *argv)
 
 static void initsrv(const Args *args)
 {
+        setuputctz();
         setupsock(args);
         setuprootpath(args);
         setupsighandler();
         server.index = args->index ? args->index : DEFAULTINDEX;
+}
+
+static void setuputctz(void)
+{
+        if (setenv("TZ", "UTC", 1) == -1)
+                die("setenv: %s", strerror(errno));
+        tzset();
 }
 
 static void setupsock(const Args *args)
@@ -829,6 +841,11 @@ static void hparsecontentlen(HConn *conn, const char *value)
                 conn->req.contentlen = clen;
 }
 
+static void hparseifmodsince(HConn *conn, const char *value)
+{
+        conn->req.ifmodsince = hdate2time(value);
+}
+
 static void hparserange(HConn *conn, const char *value)
 {
         char buf[32];
@@ -914,10 +931,15 @@ static int hresperr(HConn *conn, int errstatus)
 static int hrespfile(HConn *conn, const char *path, const struct stat *finfo)
 {
         char hdate[32];
-        FILE *f = fopen(path, "r");
+        FILE *f;
 
-        if ( ! f)
-                return hresperr(conn, 404);
+        if (conn->req.ifmodsince != -1 && difftime(finfo->st_mtime, conn->req.ifmodsince) <= 0.0) {
+                conn->resp.status = 304;
+                return 304;
+        }
+
+        if ( ! (f = fopen(path, "r")))
+                return hresperr(conn, 403);
 
         haddheader(conn, "Accept-Ranges", "bytes");
         haddheader(conn, "Last-Modified", "%s", time2hdate(finfo->st_mtime, hdate, sizeof(hdate)));
@@ -1220,6 +1242,19 @@ static char *time2hdate(time_t time, char *buf, size_t size)
 {
         strftime(buf, size, HDATEFMT, gmtime(&time));;
         return buf;
+}
+
+static time_t hdate2time(const char *hdate)
+{
+        struct tm tm;
+        char *ret;
+
+        memset(&tm, 0, sizeof(tm));
+        ret = strptime(hdate, HDATEFMT, &tm);
+        if ( ! ret || *ret != '\0')
+                return -1;
+
+        return mktime(&tm);
 }
 
 static const char *parsemime(const char *path, FILE *f)
