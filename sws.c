@@ -149,8 +149,8 @@ static void             logsrvinfo(void);
 static void             ssinetntop(const struct sockaddr_storage *, char *address, char *port);
 static void             run(void);
 static void             handlereq(int client);
-static int              setsocktimeout(int, time_t);
 static HConn           *hopen(int client);
+static int              setsocktimeout(int, time_t);
 static void             hclear(HConn *);
 static void             hclose(HConn *);
 static int              isalive(HConn *);
@@ -564,10 +564,6 @@ static void handlereq(int client)
 {
         HConn *conn;
 
-        if (setsocktimeout(client, CONNTIMEOUT) == -1) {
-                logerr("setsocktimeout: %s", strerror(errno));
-                return;
-        }
         if ( ! (conn = hopen(client))) {
                 logerr("cannot open http connection");
                 return;
@@ -591,25 +587,13 @@ static void handlereq(int client)
         hclose(conn);
 }
 
-static int setsocktimeout(int sock, time_t sec)
-{
-        struct timeval timeout;
-
-        timeout.tv_sec  = sec;
-        timeout.tv_usec = 0;
-
-        if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0
-        &&  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) == 0)
-                return 0;
-
-        return -1;
-}
-
 static HConn *hopen(int client)
 {
         HConn *conn;
         int outfd;
 
+        if (setsocktimeout(client, CONNTIMEOUT) == -1)
+                goto errtimeout;
         if ( ! (conn = malloc(sizeof(*conn))))
                 goto errconn;
         if ( ! (conn->in = fdopen(client, "r")))
@@ -636,7 +620,22 @@ erroutfd:
 errin:
         free(conn);
 errconn:
+errtimeout:
         return NULL;
+}
+
+static int setsocktimeout(int sock, time_t sec)
+{
+        struct timeval timeout;
+
+        timeout.tv_sec  = sec;
+        timeout.tv_usec = 0;
+
+        if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0
+        &&  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) == 0)
+                return 0;
+
+        return -1;
 }
 
 static void hclear(HConn *conn)
