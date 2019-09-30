@@ -115,6 +115,8 @@ struct HResp                            /* http response */
 
 struct HConn                            /* http connection */
 {
+        struct sockaddr_storage addr;   /* client address */
+
         FILE           *in;             /* input stream */
         FILE           *out;            /* output stream */
         int             reqsleft;       /* number of remaining requests allowed on this connection */
@@ -590,12 +592,15 @@ static void handlereq(int client)
 static HConn *hopen(int client)
 {
         HConn *conn;
+        socklen_t addrlen = sizeof(struct sockaddr_storage);
         int outfd;
 
         if (setsocktimeout(client, CONNTIMEOUT) == -1)
                 goto errtimeout;
         if ( ! (conn = malloc(sizeof(*conn))))
                 goto errconn;
+        if (getpeername(client, (struct sockaddr *)&conn->addr, &addrlen) == -1)
+                goto erraddr;
         if ( ! (conn->in = fdopen(client, "r")))
                 goto errin;
         if ((outfd = dup(client)) == -1)
@@ -618,6 +623,7 @@ errout:
 erroutfd:
         fclose(conn->in);
 errin:
+erraddr:
         free(conn);
 errconn:
 errtimeout:
@@ -1282,24 +1288,15 @@ static int mimetypecmp(const void *ext, const void *mimetype)
 
 static void loghconn(const HConn *conn)
 {
-        struct sockaddr_storage ss;
-        socklen_t               sslen = sizeof(ss);
-        char                    address[INET6_ADDRSTRLEN], port[6], timestamp[64];
+        char address[INET6_ADDRSTRLEN], port[6], date[64];
 
-        memset(&ss, 0, sslen);
-        address[0] = port[0] = '\0';
+        address[0] = port[0] = date[0] = '\0';
+        ssinetntop(&conn->addr, address, port);
+        strftime(date, sizeof(date), "%d/%b/%Y:%H:%M:%S %Z", gmtime(&conn->req.timestamp));
 
-        if (getpeername(fileno(conn->in), (struct sockaddr *)&ss, &sslen) == -1)
-                logerr("getpeername: %s", strerror(errno));
-        else
-                ssinetntop(&ss, address, port);
-
-        strftime(timestamp, sizeof(timestamp), "%d/%b/%Y:%H:%M:%S %Z", localtime(&conn->req.timestamp));
-
-        printf("%s:%s [%s] \"%s %s\" %d %s %lu\n",
+        printf("%s [%s] \"%s %s\" %d %s %lu\n",
                address,
-               port,
-               timestamp,
+               date,
                conn->req.method,
                conn->req.uri ? conn->req.uri : "",
                conn->resp.status,
