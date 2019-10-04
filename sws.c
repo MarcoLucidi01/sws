@@ -46,14 +46,15 @@
 #define MIN(a, b)       ((a) < (b) ? (a) : (b))
 #define ISASCII(c)      ((c) > 0 && (c) < 128)
 
-typedef struct Buffer   Buffer;
-typedef struct Args     Args;
-typedef struct HParser  HParser;
-typedef struct HRange   HRange;
-typedef struct HReq     HReq;
-typedef struct HResp    HResp;
-typedef struct HConn    HConn;
-typedef struct MimeType MimeType;
+typedef struct Buffer           Buffer;
+typedef struct Args             Args;
+typedef struct HParser          HParser;
+typedef struct HRange           HRange;
+typedef struct HRequest         HRequest;
+typedef struct HResponse        HResponse;
+typedef struct HConnection      HConnection;
+typedef struct MimeType         MimeType;
+typedef struct sockaddr_storage SockaddrStorage;
 
 struct Buffer                           /* autogrowing characters buffer */
 {
@@ -83,7 +84,7 @@ struct Server                           /* server informations */
 struct HParser                          /* http header parser pair stored in table */
 {
         const char     *name;           /* name of header used for searching in table */
-        void          (*parse)(HConn *, const char *value);     /* parser function */
+        void          (*parse)(HConnection *, const char *value);       /* parser function */
 };
 
 struct HRange                           /* http range header first value */
@@ -92,7 +93,7 @@ struct HRange                           /* http range header first value */
         long            end;            /* range end. -1 if nnn- */
 };
 
-struct HReq                             /* http request */
+struct HRequest                         /* http request aka req */
 {
         time_t          timestamp;      /* request arrival timestamp */
         char            method[METHODMAX];
@@ -103,7 +104,7 @@ struct HReq                             /* http request */
         long            contentlen;     /* request payload length. If present will be skipped */
 };
 
-struct HResp                            /* http response */
+struct HResponse                        /* http response aka resp */
 {
         int             status;         /* response http status */
         Buffer          headers;        /* buffer for response headers */
@@ -113,21 +114,20 @@ struct HResp                            /* http response */
         size_t          sent;           /* number of payload bytes sent to client */
 };
 
-struct HConn                            /* http connection */
+struct HConnection                      /* http connection aka conn */
 {
-        struct sockaddr_storage addr;   /* client address */
-
+        SockaddrStorage addr;           /* client address */
         FILE           *in;             /* input stream */
         FILE           *out;            /* output stream */
         int             reqsleft;       /* number of remaining requests allowed on this connection */
-        HReq            req;
-        HResp           resp;
+        HRequest        req;
+        HResponse       resp;
         Buffer          buf;            /* common buffer used e.g. for building file paths */
 };
 
-struct MimeType
+struct MimeType                         /* mime type pair stored in table */
 {
-        const char     *ext;            /* file extension */
+        const char     *ext;            /* file extension used for searching in table */
         const char     *mime;           /* mime type string */
 };
 
@@ -148,43 +148,43 @@ static void             setuprootpath(const Args *);
 static void             setupsighandler(void);
 static void             sighandler(int);
 static void             logsrvinfo(void);
-static void             ssinetntop(const struct sockaddr_storage *, char *address, char *port);
+static void             ssinetntop(const SockaddrStorage *, char *address, char *port);
 static void             run(void);
 static void             handlereq(int client);
-static HConn           *hopen(int client);
+static HConnection     *hopen(int client);
 static int              setsocktimeout(int, time_t);
-static void             hclear(HConn *);
-static void             hclose(HConn *);
-static int              isalive(HConn *);
-static int              hrecvreq(HConn *);
-static int              hparsemethod(HConn *);
-static int              hparseuri(HConn *);
-static int              hparseversion(HConn *);
-static int              hparseheaders(HConn *);
+static void             hclear(HConnection *);
+static void             hclose(HConnection *);
+static int              isalive(HConnection *);
+static int              hrecvreq(HConnection *);
+static int              hparsemethod(HConnection *);
+static int              hparseuri(HConnection *);
+static int              hparseversion(HConnection *);
+static int              hparseheaders(HConnection *);
 static HParser         *findhparser(const char *name);
 static int              hparsercmp(const void *name, const void *parser);
-static void             hparseconnection(HConn *, const char *value);
-static void             hparsecontentlen(HConn *, const char *value);
-static void             hparseifmodsince(HConn *, const char *value);
-static void             hparserange(HConn *, const char *value);
-static int              hbuildresp(HConn *);
-static int              hresperr(HConn *, int errstatus);
-static int              hrespfile(HConn *, const char *path, const struct stat *);
-static int              hrespdir(HConn *, const char *path);
+static void             hparseconnection(HConnection *, const char *value);
+static void             hparsecontentlen(HConnection *, const char *value);
+static void             hparseifmodsince(HConnection *, const char *value);
+static void             hparserange(HConnection *, const char *value);
+static int              hbuildresp(HConnection *);
+static int              hresperr(HConnection *, int errstatus);
+static int              hrespfile(HConnection *, const char *path, const struct stat *);
+static int              hrespdir(HConnection *, const char *path);
 static int              scandirfilter(const struct dirent *entry);
 static int              scandircmp(const struct dirent **a, const struct dirent **b);
-static int              hrespdirlist(HConn *, const char *path, struct dirent **, int n);
-static int              hsendresp(HConn *);
+static int              hrespdirlist(HConnection *, const char *path, struct dirent **, int n);
+static int              hsendresp(HConnection *);
 static int              fixhrange(HRange *, long contentlen);
-static int              hprintf(HConn *, const char *fmt, ...);
-static int              haddheader(HConn *, const char *name, const char *value, ...);
+static int              hprintf(HConnection *, const char *fmt, ...);
+static int              haddheader(HConnection *, const char *name, const char *value, ...);
 static char            *percentdec(char *);
 static char            *percentenc(const char *, char *buf, size_t size);
 static char            *time2hdate(time_t time, char *buf, size_t size);
 static time_t           hdate2time(const char *);
 static const char      *parsemime(const char *path, FILE *f);
 static int              mimetypecmp(const void *ext, const void *mimetype);
-static void             loghconn(const HConn *);
+static void             loghconn(const HConnection *);
 static char            *strtrim(char *s);
 static const char      *strstatus(int);
 static void             logerr(const char *fmt, ...);
@@ -507,9 +507,9 @@ static void sighandler(int sig)
 
 static void logsrvinfo(void)
 {
-        struct sockaddr_storage ss;
-        socklen_t               sslen = sizeof(ss);
-        char                    address[INET6_ADDRSTRLEN], port[6];
+        SockaddrStorage ss;
+        socklen_t       sslen = sizeof(ss);
+        char            address[INET6_ADDRSTRLEN], port[6];
 
         memset(&ss, 0, sslen);
         if (getsockname(server.sock, (struct sockaddr *)&ss, &sslen) == -1)
@@ -524,7 +524,7 @@ static void logsrvinfo(void)
                (long)getpid());
 }
 
-static void ssinetntop(const struct sockaddr_storage *ss, char *address, char *port)
+static void ssinetntop(const SockaddrStorage *ss, char *address, char *port)
 {
         if (ss->ss_family == AF_INET) {
                 inet_ntop(AF_INET, &(((struct sockaddr_in *)ss)->sin_addr), address, INET_ADDRSTRLEN);
@@ -564,7 +564,7 @@ static void run(void)
 
 static void handlereq(int client)
 {
-        HConn *conn;
+        HConnection *conn;
 
         if ( ! (conn = hopen(client))) {
                 logerr("cannot open http connection");
@@ -589,10 +589,10 @@ static void handlereq(int client)
         hclose(conn);
 }
 
-static HConn *hopen(int client)
+static HConnection *hopen(int client)
 {
-        HConn *conn;
-        socklen_t addrlen = sizeof(struct sockaddr_storage);
+        HConnection *conn;
+        socklen_t addrlen = sizeof(SockaddrStorage);
         int outfd;
 
         if (setsocktimeout(client, CONNTIMEOUT) == -1)
@@ -644,7 +644,7 @@ static int setsocktimeout(int sock, time_t sec)
         return -1;
 }
 
-static void hclear(HConn *conn)
+static void hclear(HConnection *conn)
 {
         conn->req.timestamp   = (time_t)-1;
         conn->req.method[0]   = '\0';
@@ -669,7 +669,7 @@ static void hclear(HConn *conn)
         bufclear(&conn->buf);
 }
 
-static void hclose(HConn *conn)
+static void hclose(HConnection *conn)
 {
         hclear(conn);   /* to free req.uri and close resp.file */
         bufdeinit(&conn->resp.headers);
@@ -680,12 +680,12 @@ static void hclose(HConn *conn)
         free(conn);
 }
 
-static int isalive(HConn *conn)
+static int isalive(HConnection *conn)
 {
         return ! feof(conn->in) && ! ferror(conn->in) && ! feof(conn->out) && ! ferror(conn->out);
 }
 
-static int hrecvreq(HConn *conn)
+static int hrecvreq(HConnection *conn)
 {
         int ret = hparsemethod(conn);
 
@@ -704,7 +704,7 @@ static int hrecvreq(HConn *conn)
         return ret;
 }
 
-static int hparsemethod(HConn *conn)
+static int hparsemethod(HConnection *conn)
 {
         char   buf[METHODMAX];
         size_t len = 0;
@@ -728,7 +728,7 @@ static int hparsemethod(HConn *conn)
         return 200;
 }
 
-static int hparseuri(HConn *conn)
+static int hparseuri(HConnection *conn)
 {
         Buffer *buf = &conn->buf;
         int     c;
@@ -754,7 +754,7 @@ static int hparseuri(HConn *conn)
         return 200;
 }
 
-static int hparseversion(HConn *conn)
+static int hparseversion(HConnection *conn)
 {
         int c;
 
@@ -786,7 +786,7 @@ static int hparseversion(HConn *conn)
         return 200;
 }
 
-static int hparseheaders(HConn *conn)
+static int hparseheaders(HConnection *conn)
 {
         Buffer *buf = &conn->buf;
         int i, c;
@@ -833,12 +833,12 @@ static int hparsercmp(const void *name, const void *parser)
         return strcasecmp((const char *)name, ((const HParser *)parser)->name);
 }
 
-static void hparseconnection(HConn *conn, const char *value)
+static void hparseconnection(HConnection *conn, const char *value)
 {
         conn->req.keepalive = strcmp(value, "keep-alive") == 0;
 }
 
-static void hparsecontentlen(HConn *conn, const char *value)
+static void hparsecontentlen(HConnection *conn, const char *value)
 {
         long clen = atol(value);
 
@@ -846,12 +846,12 @@ static void hparsecontentlen(HConn *conn, const char *value)
                 conn->req.contentlen = clen;
 }
 
-static void hparseifmodsince(HConn *conn, const char *value)
+static void hparseifmodsince(HConnection *conn, const char *value)
 {
         conn->req.ifmodsince = hdate2time(value);
 }
 
-static void hparserange(HConn *conn, const char *value)
+static void hparserange(HConnection *conn, const char *value)
 {
         char buf[32];
         const char *p = value;
@@ -892,7 +892,7 @@ static void hparserange(HConn *conn, const char *value)
         }
 }
 
-static int hbuildresp(HConn *conn)
+static int hbuildresp(HConnection *conn)
 {
         struct stat finfo;
         const char *relpath;
@@ -922,7 +922,7 @@ static int hbuildresp(HConn *conn)
         return hresperr(conn, 403);
 }
 
-static int hresperr(HConn *conn, int errstatus)
+static int hresperr(HConnection *conn, int errstatus)
 {
         hprintf(conn, "<!DOCTYPE html><title>%d %s</title><h1>%d %s</h1>",
                 errstatus, strstatus(errstatus), errstatus, strstatus(errstatus));
@@ -933,7 +933,7 @@ static int hresperr(HConn *conn, int errstatus)
         return errstatus;
 }
 
-static int hrespfile(HConn *conn, const char *path, const struct stat *finfo)
+static int hrespfile(HConnection *conn, const char *path, const struct stat *finfo)
 {
         char hdate[32];
         FILE *f;
@@ -956,7 +956,7 @@ static int hrespfile(HConn *conn, const char *path, const struct stat *finfo)
         return 200;
 }
 
-static int hrespdir(HConn *conn, const char *path)
+static int hrespdir(HConnection *conn, const char *path)
 {
         Buffer *buf = &conn->buf;
         size_t pathlen = strlen(path);
@@ -1015,7 +1015,7 @@ static int scandircmp(const struct dirent **a, const struct dirent **b)
         return strcasecmp((*a)->d_name, (*b)->d_name);
 }
 
-static int hrespdirlist(HConn *conn, const char *path, struct dirent **entries, int n)
+static int hrespdirlist(HConnection *conn, const char *path, struct dirent **entries, int n)
 {
         Buffer *buf = &conn->buf;
         struct stat finfo;
@@ -1065,13 +1065,13 @@ static int hrespdirlist(HConn *conn, const char *path, struct dirent **entries, 
         return 200;
 }
 
-static int hsendresp(HConn *conn)
+static int hsendresp(HConnection *conn)
 {
         unsigned long contentlen, tosend, n;
         char hdate[32], *p;
         HRange *range;
-        HReq *req = &conn->req;
-        HResp *resp = &conn->resp;
+        HRequest *req = &conn->req;
+        HResponse *resp = &conn->resp;
         Buffer *buf = &conn->buf;
 
         contentlen = resp->file ? (unsigned long)resp->filesize : (unsigned long)resp->content.len;
@@ -1157,7 +1157,7 @@ static int fixhrange(HRange *range, long contentlen)
         return 0;
 }
 
-static int hprintf(HConn *conn, const char *fmt, ...)
+static int hprintf(HConnection *conn, const char *fmt, ...)
 {
         va_list ap, apcopy;
         int     ret;
@@ -1171,7 +1171,7 @@ static int hprintf(HConn *conn, const char *fmt, ...)
         return ret >= 0 ? 200 : 500;
 }
 
-static int haddheader(HConn *conn, const char *name, const char *value, ...)
+static int haddheader(HConnection *conn, const char *name, const char *value, ...)
 {
         Buffer  *buf = &conn->resp.headers;
         va_list  ap, apcopy;
@@ -1286,7 +1286,7 @@ static int mimetypecmp(const void *ext, const void *mimetype)
         return strcasecmp((const char *)ext, ((const MimeType *)mimetype)->ext);
 }
 
-static void loghconn(const HConn *conn)
+static void loghconn(const HConnection *conn)
 {
         char address[INET6_ADDRSTRLEN], port[6], date[64];
 
