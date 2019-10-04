@@ -132,13 +132,13 @@ struct MimeType                         /* mime type pair stored in table */
 };
 
 static void             bufinit(Buffer *);
-static int              bufputs(Buffer *, const char *s);
-static int              bufputc(Buffer *, int c);
-static int              bufvprintf(Buffer *, const char *fmt, va_list ap, va_list apcopy);
-static int              bufreserve(Buffer *, size_t n);
+static int              bufputs(Buffer *, const char *);
+static int              bufputc(Buffer *, int);
+static int              bufvprintf(Buffer *, const char *, va_list ap, va_list apcopy);
+static int              bufreserve(Buffer *, size_t);
 static size_t           bufavailable(Buffer *);
 static void             bufclear(Buffer *);
-static void             buftruncate(Buffer *, size_t newlen);
+static void             buftruncate(Buffer *, size_t);
 static void             bufdeinit(Buffer *);
 static void             parseargs(Args *, int argc, char *const *argv);
 static void             initsrv(const Args *);
@@ -150,54 +150,54 @@ static void             sighandler(int);
 static void             logsrvinfo(void);
 static void             ssinetntop(const SockaddrStorage *, char *address, char *port);
 static void             run(void);
-static void             handlereq(int client);
-static HConnection     *hopen(int client);
+static void             handlereq(int);
+static HConnection     *hopen(int);
 static int              setsocktimeout(int, time_t);
 static void             hclear(HConnection *);
 static void             hclose(HConnection *);
 static int              isalive(HConnection *);
-static int              hrecvreq(HConnection *);
-static int              hparsemethod(HConnection *);
-static int              hparseuri(HConnection *);
-static int              hparseversion(HConnection *);
-static int              hparseheaders(HConnection *);
+static int              recvreq(HConnection *);
+static int              parsemethod(HConnection *);
+static int              parseuri(HConnection *);
+static int              parseversion(HConnection *);
+static int              parseheaders(HConnection *);
 static HParser         *findhparser(const char *name);
 static int              hparsercmp(const void *name, const void *parser);
-static void             hparseconnection(HConnection *, const char *value);
-static void             hparsecontentlen(HConnection *, const char *value);
-static void             hparseifmodsince(HConnection *, const char *value);
-static void             hparserange(HConnection *, const char *value);
-static int              hbuildresp(HConnection *);
-static int              hresperr(HConnection *, int errstatus);
-static int              hrespfile(HConnection *, const char *path, const struct stat *);
-static int              hrespdir(HConnection *, const char *path);
-static int              scandirfilter(const struct dirent *entry);
-static int              scandircmp(const struct dirent **a, const struct dirent **b);
-static int              hrespdirlist(HConnection *, const char *path, struct dirent **, int n);
-static int              hsendresp(HConnection *);
+static void             parseconnection(HConnection *, const char *);
+static void             parsecontentlen(HConnection *, const char *);
+static void             parseifmodsince(HConnection *, const char *);
+static void             parserange(HConnection *, const char *);
+static int              buildresp(HConnection *);
+static int              buildresperror(HConnection *, int errstatus);
+static int              buildrespfile(HConnection *, const char *path, const struct stat *);
+static int              buildrespdir(HConnection *, const char *path);
+static int              scandirfilter(const struct dirent *);
+static int              scandircmp(const struct dirent **, const struct dirent **);
+static int              buildrespdirlist(HConnection *, const char *path, struct dirent **, int n);
+static int              sendresp(HConnection *);
 static int              fixhrange(HRange *, long contentlen);
-static int              hprintf(HConnection *, const char *fmt, ...);
-static int              haddheader(HConnection *, const char *name, const char *value, ...);
-static char            *percentdec(char *);
-static char            *percentenc(const char *, char *buf, size_t size);
-static char            *time2hdate(time_t time, char *buf, size_t size);
+static int              hprintf(HConnection *, const char *, ...);
+static int              addheader(HConnection *, const char *name, const char *value, ...);
+static char            *uridecode(char *);
+static char            *uriencode(const char *, char *buf, size_t size);
+static char            *time2hdate(time_t, char *buf, size_t size);
 static time_t           hdate2time(const char *);
-static const char      *parsemime(const char *path, FILE *f);
+static const char      *parsemimetype(const char *fname, FILE *);
 static int              mimetypecmp(const void *ext, const void *mimetype);
-static void             loghconn(const HConnection *);
-static char            *strtrim(char *s);
+static void             logconnection(const HConnection *);
+static char            *strtrim(char *);
 static const char      *strstatus(int);
-static void             logerr(const char *fmt, ...);
-static void             vlogerr(const char *fmt, va_list ap);
-static void             die(const char *reason, ...);
+static void             logerror(const char *, ...);
+static void             vlogerror(const char *, va_list);
+static void             die(const char *, ...);
 static void             cleanup(void);
 
 static HParser hparsers[] =     /* keep sorted */
 {
-        { "connection",         hparseconnection },
-        { "content-length",     hparsecontentlen },
-        { "if-modified-since",  hparseifmodsince },
-        { "range",              hparserange      },
+        { "connection",         parseconnection },
+        { "content-length",     parsecontentlen },
+        { "if-modified-since",  parseifmodsince },
+        { "range",              parserange      },
 };
 
 static MimeType mimetypes[] =   /* keep sorted by extension */
@@ -545,7 +545,7 @@ static void run(void)
                 int client = accept(server.sock, NULL, NULL);
                 if (client == -1) {
                         if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
-                                logerr("accept: %s", strerror(errno));
+                                logerror("accept: %s", strerror(errno));
                         continue;
                 }
 
@@ -554,7 +554,7 @@ static void run(void)
                         handlereq(client);
                         return;
                 case -1:
-                        logerr("fork: %s", strerror(errno));
+                        logerror("fork: %s", strerror(errno));
                         /* fallthrough */
                 default:
                         close(client);
@@ -567,22 +567,22 @@ static void handlereq(int client)
         HConnection *conn;
 
         if ( ! (conn = hopen(client))) {
-                logerr("cannot open http connection");
+                logerror("cannot open http connection");
                 return;
         }
 
         do {
                 hclear(conn);
-                hrecvreq(conn);
+                recvreq(conn);
 
                 if ( ! isalive(conn))
                         break;          /* client disconnected, don't bother go on */
 
                 conn->reqsleft--;
-                hbuildresp(conn);
-                hsendresp(conn);
+                buildresp(conn);
+                sendresp(conn);
                 fflush(conn->out);
-                loghconn(conn);
+                logconnection(conn);
 
         } while (conn->req.keepalive && conn->reqsleft > 0);
 
@@ -685,9 +685,9 @@ static int isalive(HConnection *conn)
         return ! feof(conn->in) && ! ferror(conn->in) && ! feof(conn->out) && ! ferror(conn->out);
 }
 
-static int hrecvreq(HConnection *conn)
+static int recvreq(HConnection *conn)
 {
-        int ret = hparsemethod(conn);
+        int ret = parsemethod(conn);
 
         conn->req.timestamp = time(NULL);
 
@@ -695,16 +695,16 @@ static int hrecvreq(HConnection *conn)
          * stop at first return value != 200
          */
         if (ret != 200
-        ||  (ret = hparseuri(conn))     != 200
-        ||  (ret = hparseversion(conn)) != 200
-        ||  (ret = hparseheaders(conn)) != 200) {
+        ||  (ret = parseuri(conn))     != 200
+        ||  (ret = parseversion(conn)) != 200
+        ||  (ret = parseheaders(conn)) != 200) {
         }
 
         conn->resp.status = ret;
         return ret;
 }
 
-static int hparsemethod(HConnection *conn)
+static int parsemethod(HConnection *conn)
 {
         char   buf[METHODMAX];
         size_t len = 0;
@@ -728,7 +728,7 @@ static int hparsemethod(HConnection *conn)
         return 200;
 }
 
-static int hparseuri(HConnection *conn)
+static int parseuri(HConnection *conn)
 {
         Buffer *buf = &conn->buf;
         int     c;
@@ -747,14 +747,14 @@ static int hparseuri(HConnection *conn)
         if (bufputc(buf, '\0') == -1)
                 return 500;
 
-        percentdec(buf->data);
+        uridecode(buf->data);
         if ( ! (conn->req.uri = strdup(buf->data)))
                 return 500;
 
         return 200;
 }
 
-static int hparseversion(HConnection *conn)
+static int parseversion(HConnection *conn)
 {
         int c;
 
@@ -786,7 +786,7 @@ static int hparseversion(HConnection *conn)
         return 200;
 }
 
-static int hparseheaders(HConnection *conn)
+static int parseheaders(HConnection *conn)
 {
         Buffer *buf = &conn->buf;
         int i, c;
@@ -833,12 +833,12 @@ static int hparsercmp(const void *name, const void *parser)
         return strcasecmp((const char *)name, ((const HParser *)parser)->name);
 }
 
-static void hparseconnection(HConnection *conn, const char *value)
+static void parseconnection(HConnection *conn, const char *value)
 {
         conn->req.keepalive = strcmp(value, "keep-alive") == 0;
 }
 
-static void hparsecontentlen(HConnection *conn, const char *value)
+static void parsecontentlen(HConnection *conn, const char *value)
 {
         long clen = atol(value);
 
@@ -846,12 +846,12 @@ static void hparsecontentlen(HConnection *conn, const char *value)
                 conn->req.contentlen = clen;
 }
 
-static void hparseifmodsince(HConnection *conn, const char *value)
+static void parseifmodsince(HConnection *conn, const char *value)
 {
         conn->req.ifmodsince = hdate2time(value);
 }
 
-static void hparserange(HConnection *conn, const char *value)
+static void parserange(HConnection *conn, const char *value)
 {
         char buf[32];
         const char *p = value;
@@ -892,18 +892,18 @@ static void hparserange(HConnection *conn, const char *value)
         }
 }
 
-static int hbuildresp(HConnection *conn)
+static int buildresp(HConnection *conn)
 {
         struct stat finfo;
         const char *relpath;
 
         if (conn->resp.status != 200)
-                return hresperr(conn, conn->resp.status);
+                return buildresperror(conn, conn->resp.status);
 
         relpath = strtrim(conn->req.uri);
 
         if (relpath[0] == '.' || strstr(relpath, "/."))
-                return hresperr(conn, 404);
+                return buildresperror(conn, 404);
 
         for (; *relpath == '/'; relpath++)
                 ;
@@ -911,29 +911,29 @@ static int hbuildresp(HConnection *conn)
                 relpath = "./";
 
         if (lstat(relpath, &finfo) == -1)
-                return hresperr(conn, 404);
+                return buildresperror(conn, 404);
 
         if (S_ISREG(finfo.st_mode))
-                return hrespfile(conn, relpath, &finfo);
+                return buildrespfile(conn, relpath, &finfo);
         else if (S_ISDIR(finfo.st_mode)) {
-                return hrespdir(conn, relpath);
+                return buildrespdir(conn, relpath);
         }
 
-        return hresperr(conn, 403);
+        return buildresperror(conn, 403);
 }
 
-static int hresperr(HConnection *conn, int errstatus)
+static int buildresperror(HConnection *conn, int errstatus)
 {
         hprintf(conn, "<!DOCTYPE html><title>%d %s</title><h1>%d %s</h1>",
                 errstatus, strstatus(errstatus), errstatus, strstatus(errstatus));
 
-        haddheader(conn, "Content-Type", "text/html");
+        addheader(conn, "Content-Type", "text/html");
 
         conn->resp.status = errstatus;
         return errstatus;
 }
 
-static int hrespfile(HConnection *conn, const char *path, const struct stat *finfo)
+static int buildrespfile(HConnection *conn, const char *path, const struct stat *finfo)
 {
         char hdate[32];
         FILE *f;
@@ -944,11 +944,11 @@ static int hrespfile(HConnection *conn, const char *path, const struct stat *fin
         }
 
         if ( ! (f = fopen(path, "r")))
-                return hresperr(conn, 403);
+                return buildresperror(conn, 403);
 
-        haddheader(conn, "Accept-Ranges", "bytes");
-        haddheader(conn, "Last-Modified", "%s", time2hdate(finfo->st_mtime, hdate, sizeof(hdate)));
-        haddheader(conn, "Content-Type", "%s", parsemime(path, f));
+        addheader(conn, "Accept-Ranges", "bytes");
+        addheader(conn, "Last-Modified", "%s", time2hdate(finfo->st_mtime, hdate, sizeof(hdate)));
+        addheader(conn, "Content-Type", "%s", parsemimetype(path, f));
 
         conn->resp.file = f;
         conn->resp.filesize = finfo->st_size;
@@ -956,7 +956,7 @@ static int hrespfile(HConnection *conn, const char *path, const struct stat *fin
         return 200;
 }
 
-static int hrespdir(HConnection *conn, const char *path)
+static int buildrespdir(HConnection *conn, const char *path)
 {
         Buffer *buf = &conn->buf;
         size_t pathlen = strlen(path);
@@ -970,10 +970,10 @@ static int hrespdir(HConnection *conn, const char *path)
 
         if (path[pathlen - 1] != '/') {
                 if (bufreserve(buf, pathlen * 3 + 1) == -1)
-                        return hresperr(conn, 500);
+                        return buildresperror(conn, 500);
 
-                haddheader(conn, "Location", "/%s/", percentenc(path, buf->data, buf->cap));
-                return hresperr(conn, 301);
+                addheader(conn, "Location", "/%s/", uriencode(path, buf->data, buf->cap));
+                return buildresperror(conn, 301);
         }
 
         /*
@@ -984,19 +984,19 @@ static int hrespdir(HConnection *conn, const char *path)
         if (bufputs(buf, path) == -1
         ||  bufputs(buf, server.index) == -1
         ||  bufputc(buf, '\0') == -1)
-                return hresperr(conn, 500);
+                return buildresperror(conn, 500);
 
         if (lstat(buf->data, &finfo) == 0 && S_ISREG(finfo.st_mode))
-                return hrespfile(conn, buf->data, &finfo);
+                return buildrespfile(conn, buf->data, &finfo);
 
         /*
          * directory listing
          */
 
         if ((n = scandir(path, &entries, scandirfilter, scandircmp)) == -1)
-                return hresperr(conn, 404);
+                return buildresperror(conn, 404);
 
-        ret = hrespdirlist(conn, path, entries, n);
+        ret = buildrespdirlist(conn, path, entries, n);
 
         while (n--)
                 free(entries[n]);
@@ -1015,7 +1015,7 @@ static int scandircmp(const struct dirent **a, const struct dirent **b)
         return strcasecmp((*a)->d_name, (*b)->d_name);
 }
 
-static int hrespdirlist(HConnection *conn, const char *path, struct dirent **entries, int n)
+static int buildrespdirlist(HConnection *conn, const char *path, struct dirent **entries, int n)
 {
         Buffer *buf = &conn->buf;
         struct stat finfo;
@@ -1057,15 +1057,15 @@ static int hrespdirlist(HConnection *conn, const char *path, struct dirent **ent
                         continue;
 
                 strftime(mtime, sizeof(mtime), "%Y-%m-%d %H:%M:%S %Z", localtime(&finfo.st_mtime));
-                hprintf(conn, fmt, percentenc(fname, buf->data, buf->cap), fname, mtime, (long)finfo.st_size);
+                hprintf(conn, fmt, uriencode(fname, buf->data, buf->cap), fname, mtime, (long)finfo.st_size);
         }
         hprintf(conn, "</table>\n");
 
-        haddheader(conn, "Content-Type", "%s", "text/html");
+        addheader(conn, "Content-Type", "%s", "text/html");
         return 200;
 }
 
-static int hsendresp(HConnection *conn)
+static int sendresp(HConnection *conn)
 {
         unsigned long contentlen, tosend, n;
         char hdate[32], *p;
@@ -1078,20 +1078,20 @@ static int hsendresp(HConnection *conn)
 
         range = (req->range.start != -1 || req->range.end != -1) ? &req->range : NULL;
         if (resp->status == 200 && range && fixhrange(range, contentlen) == 0) {
-                haddheader(conn, "Content-Range", "bytes %ld-%ld/%lu", range->start, range->end, contentlen);
+                addheader(conn, "Content-Range", "bytes %ld-%ld/%lu", range->start, range->end, contentlen);
                 contentlen = range->end - range->start;
                 resp->status = 206;
         }
 
         if (req->keepalive && conn->reqsleft > 0) {
-                haddheader(conn, "Connection", "keep-alive");
-                haddheader(conn, "Keep-Alive", "timeout=%d, max=%d", CONNTIMEOUT, conn->reqsleft);
+                addheader(conn, "Connection", "keep-alive");
+                addheader(conn, "Keep-Alive", "timeout=%d, max=%d", CONNTIMEOUT, conn->reqsleft);
         } else
-                haddheader(conn, "Connection", "close");
+                addheader(conn, "Connection", "close");
 
-        haddheader(conn, "Content-Length", "%lu", contentlen);
-        haddheader(conn, "Date", "%s", time2hdate(time(NULL), hdate, sizeof(hdate)));
-        haddheader(conn, "Server", "sws " VERSION);
+        addheader(conn, "Content-Length", "%lu", contentlen);
+        addheader(conn, "Date", "%s", time2hdate(time(NULL), hdate, sizeof(hdate)));
+        addheader(conn, "Server", "sws " VERSION);
 
         /*
          * response head
@@ -1171,7 +1171,7 @@ static int hprintf(HConnection *conn, const char *fmt, ...)
         return ret >= 0 ? 200 : 500;
 }
 
-static int haddheader(HConnection *conn, const char *name, const char *value, ...)
+static int addheader(HConnection *conn, const char *name, const char *value, ...)
 {
         Buffer  *buf = &conn->resp.headers;
         va_list  ap, apcopy;
@@ -1192,7 +1192,7 @@ static int haddheader(HConnection *conn, const char *name, const char *value, ..
         return 200;
 }
 
-static char *percentdec(char *s)
+static char *uridecode(char *s)
 {
         char *e = s;    /* encoded character pointer */
         char *d = s;    /* decoded character pointer */
@@ -1211,7 +1211,7 @@ static char *percentdec(char *s)
         return s;
 }
 
-static char *percentenc(const char *s, char *buf, size_t size)
+static char *uriencode(const char *s, char *buf, size_t size)
 {
         unsigned char c, tmp;
         size_t i = 0;
@@ -1262,9 +1262,9 @@ static time_t hdate2time(const char *hdate)
         return mktime(&tm);
 }
 
-static const char *parsemime(const char *path, FILE *f)
+static const char *parsemimetype(const char *fname, FILE *f)
 {
-        const char *ext = strrchr(path, '.');
+        const char *ext = strrchr(fname, '.');
         MimeType *m;
         char buf[256];
         size_t n, i;
@@ -1286,7 +1286,7 @@ static int mimetypecmp(const void *ext, const void *mimetype)
         return strcasecmp((const char *)ext, ((const MimeType *)mimetype)->ext);
 }
 
-static void loghconn(const HConnection *conn)
+static void logconnection(const HConnection *conn)
 {
         char address[INET6_ADDRSTRLEN], port[6], date[64];
 
@@ -1345,16 +1345,16 @@ static const char *strstatus(int status)
         }
 }
 
-static void logerr(const char *fmt, ...)
+static void logerror(const char *fmt, ...)
 {
         va_list ap;
 
         va_start(ap, fmt);
-        vlogerr(fmt, ap);
+        vlogerror(fmt, ap);
         va_end(ap);
 }
 
-static void vlogerr(const char *fmt, va_list ap)
+static void vlogerror(const char *fmt, va_list ap)
 {
         fprintf(stderr, "sws: ");
         vfprintf(stderr, fmt, ap);
@@ -1366,7 +1366,7 @@ static void die(const char *reason, ...)
         va_list ap;
 
         va_start(ap, reason);
-        vlogerr(reason, ap);
+        vlogerror(reason, ap);
         va_end(ap);
 
         cleanup();
