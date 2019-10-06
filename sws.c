@@ -278,8 +278,8 @@ static struct Server server;            /* global server informations */
 
 static void bufinit(Buffer *buf)
 {
-        buf->cap  = 0;
-        buf->len  = 0;
+        buf->cap = 0;
+        buf->len = 0;
         buf->data = NULL;
 }
 
@@ -508,8 +508,8 @@ static void sighandler(int sig)
 static void logsrvinfo(void)
 {
         SockaddrStorage ss;
-        socklen_t       sslen = sizeof(ss);
-        char            address[INET6_ADDRSTRLEN], port[6];
+        socklen_t sslen = sizeof(ss);
+        char address[INET6_ADDRSTRLEN], port[6];
 
         memset(&ss, 0, sslen);
         if (getsockname(server.sock, (struct sockaddr *)&ss, &sslen) == -1)
@@ -540,10 +540,11 @@ static void ssinetntop(const SockaddrStorage *ss, char *address, char *port)
 
 static void run(void)
 {
+        int client;
+
         server.running = 1;
         while (server.running) {
-                int client = accept(server.sock, NULL, NULL);
-                if (client == -1) {
+                if ((client = accept(server.sock, NULL, NULL)) == -1) {
                         if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
                                 logerror("accept: %s", strerror(errno));
                         continue;
@@ -706,9 +707,9 @@ static int recvreq(HConnection *conn)
 
 static int parsemethod(HConnection *conn)
 {
-        char   buf[METHODMAX];
+        char buf[METHODMAX];
         size_t len = 0;
-        int    c;
+        int c;
 
         while ((c = fgetc(conn->in)) != EOF) {
                 if (c == ' ' || ! isupper(c) || len == sizeof(buf) - 1)
@@ -731,7 +732,7 @@ static int parsemethod(HConnection *conn)
 static int parseuri(HConnection *conn)
 {
         Buffer *buf = &conn->buf;
-        int     c;
+        int c;
 
         bufclear(buf);
         while ((c = fgetc(conn->in)) != EOF) {
@@ -853,10 +854,9 @@ static void parseifmodsince(HConnection *conn, const char *value)
 
 static void parserange(HConnection *conn, const char *value)
 {
-        char buf[32];
         const char *p = value;
-        long start = -1;
-        long end = -1;
+        char buf[32];
+        long start = -1, end = -1;
         size_t i;
 
         if (strncmp(p, "bytes=", strlen("bytes=")) != 0)
@@ -901,7 +901,6 @@ static int buildresp(HConnection *conn)
                 return buildresperror(conn, conn->resp.status);
 
         relpath = strtrim(conn->req.uri);
-
         if (relpath[0] == '.' || strstr(relpath, "/."))
                 return buildresperror(conn, 404);
 
@@ -915,9 +914,8 @@ static int buildresp(HConnection *conn)
 
         if (S_ISREG(finfo.st_mode))
                 return buildrespfile(conn, relpath, &finfo);
-        else if (S_ISDIR(finfo.st_mode)) {
+        else if (S_ISDIR(finfo.st_mode))
                 return buildrespdir(conn, relpath);
-        }
 
         return buildresperror(conn, 403);
 }
@@ -1020,10 +1018,10 @@ static int buildrespdirlist(HConnection *conn, const char *path, struct dirent *
         Buffer *buf = &conn->buf;
         struct stat finfo;
         char mtime[32];
-        const char *fname, *fmt;
-        const char *title = strcmp(path, "./") == 0 ? "" : path;
+        const char *title, *fname, *fmt;
         int i;
 
+        title = strcmp(path, "./") == 0 ? "" : path;
         hprintf(conn, "<!DOCTYPE html><style>"
                       "table { border-collapse: collapse; }"
                       "td { border: 1px solid #ddd; padding: 10px; }"
@@ -1160,7 +1158,7 @@ static int fixhrange(HRange *range, long contentlen)
 static int hprintf(HConnection *conn, const char *fmt, ...)
 {
         va_list ap, apcopy;
-        int     ret;
+        int ret;
 
         va_start(ap, fmt);
         va_start(apcopy, fmt);
@@ -1173,9 +1171,9 @@ static int hprintf(HConnection *conn, const char *fmt, ...)
 
 static int addheader(HConnection *conn, const char *name, const char *value, ...)
 {
-        Buffer  *buf = &conn->resp.headers;
-        va_list  ap, apcopy;
-        int      ret;
+        Buffer *buf = &conn->resp.headers;
+        va_list ap, apcopy;
+        int ret;
 
         if (bufputs(buf, name) || bufputs(buf, ": ") == -1)
                 return 500;
@@ -1264,11 +1262,12 @@ static time_t hdate2time(const char *hdate)
 
 static const char *parsemimetype(const char *fname, FILE *f)
 {
-        const char *ext = strrchr(fname, '.');
+        const char *ext;
         MimeType *m;
         char buf[256];
         size_t n, i;
 
+        ext = strrchr(fname, '.');
         if (ext && (m = bsearch(++ext, mimetypes, ARRAYLEN(mimetypes), sizeof(*mimetypes), mimetypecmp)))
                 return m->mime;
 
