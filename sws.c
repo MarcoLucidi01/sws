@@ -337,7 +337,7 @@ static int bufreserve(Buffer *buf, size_t n)
 
         newcap = buf->cap + MAX(BUFCHUNK, (n - bufavailable(buf)));
 
-        if ( ! (p = realloc(buf->data, newcap)))
+        if ((p = realloc(buf->data, newcap)) == NULL)
                 return -1;
 
         buf->cap = newcap;
@@ -446,7 +446,7 @@ static void setupsock(const Args *args)
 
         freeaddrinfo(info);
 
-        if ( ! p)
+        if (p == NULL)
                 die("failed to bind socket");
 }
 
@@ -567,7 +567,7 @@ static void handlereq(int client)
 {
         HConnection *conn;
 
-        if ( ! (conn = hopen(client))) {
+        if ((conn = hopen(client)) == NULL) {
                 logerror("cannot open http connection");
                 return;
         }
@@ -598,15 +598,15 @@ static HConnection *hopen(int client)
 
         if (setsocktimeout(client, CONNTIMEOUT) == -1)
                 goto errtimeout;
-        if ( ! (conn = malloc(sizeof(*conn))))
+        if ((conn = malloc(sizeof(*conn))) == NULL)
                 goto errconn;
         if (getpeername(client, (struct sockaddr *)&conn->addr, &addrlen) == -1)
                 goto erraddr;
-        if ( ! (conn->in = fdopen(client, "r")))
+        if ((conn->in = fdopen(client, "r")) == NULL)
                 goto errin;
         if ((outfd = dup(client)) == -1)
                 goto erroutfd;
-        if ( ! (conn->out = fdopen(outfd, "w")))
+        if ((conn->out = fdopen(outfd, "w")) == NULL)
                 goto errout;
 
         conn->reqsleft = CONNMAXREQS;
@@ -749,7 +749,7 @@ static int parseuri(HConnection *conn)
                 return 500;
 
         uridecode(buf->data);
-        if ( ! (conn->req.uri = strdup(buf->data)))
+        if ((conn->req.uri = strdup(buf->data)) == NULL)
                 return 500;
 
         return 200;
@@ -812,7 +812,7 @@ static int parseheaders(HConnection *conn)
                         return 500;
 
                 name = buf->data;
-                if ( ! (value = strchr(name, ':')))
+                if ((value = strchr(name, ':')) == NULL)
                         return 400;     /* malformed header */
 
                 *value++ = '\0';        /* null-terminate name string */
@@ -941,7 +941,7 @@ static int buildrespfile(HConnection *conn, const char *path, const struct stat 
                 return 304;
         }
 
-        if ( ! (f = fopen(path, "r")))
+        if ((f = fopen(path, "r")) == NULL)
                 return buildresperror(conn, 403);
 
         addheader(conn, "Accept-Ranges", "bytes");
@@ -1106,7 +1106,7 @@ static int sendresp(HConnection *conn)
          * error or generated response
          */
 
-        if ((resp->status != 200 && resp->status != 206) || ! resp->file) {
+        if ((resp->status != 200 && resp->status != 206) || resp->file == NULL) {
                 p = resp->status == 206 ? resp->content.data + range->start : resp->content.data;
                 resp->sent = fwrite(p, 1, contentlen, conn->out);
                 return resp->status;
@@ -1254,7 +1254,7 @@ static time_t hdate2time(const char *hdate)
 
         memset(&tm, 0, sizeof(tm));
         ret = strptime(hdate, HDATEFMT, &tm);
-        if ( ! ret || *ret != '\0')
+        if (ret == NULL || *ret != '\0')
                 return -1;
 
         return mktime(&tm);
