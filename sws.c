@@ -1333,10 +1333,7 @@ static const char *strstatus(int status)
         case 400: return "Bad Request";
         case 403: return "Forbidden";
         case 404: return "Not Found";
-        case 408: return "Request Timeout";
-        case 413: return "Payload Too Large";
         case 414: return "URI Too Long";
-        case 416: return "Range Not Satisfiable";
         case 431: return "Request Header Fields Too Large";
         case 500: return "Internal Server Error";
         case 501: return "Not Implemented";
