@@ -455,7 +455,7 @@ static void setuprootpath(const Args *args)
 {
         Buffer buf;
 
-        if (args->rootpath && chdir(args->rootpath) != 0)
+        if (args->rootpath != NULL && chdir(args->rootpath) != 0)
                 die("chdir: %s", strerror(errno));
 
         bufinit(&buf);
