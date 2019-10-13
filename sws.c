@@ -70,7 +70,6 @@
 
 typedef struct Buffer           Buffer;
 typedef struct Args             Args;
-typedef struct HParser          HParser;
 typedef struct HRange           HRange;
 typedef struct HRequest         HRequest;
 typedef struct HResponse        HResponse;
@@ -101,12 +100,6 @@ struct Server                           /* server informations */
         int             running;        /* 1 if running, 0 if stopped */
         char           *rootpath;       /* current working directory absolute path */
         const char     *index;          /* index filename for directories requests */
-};
-
-struct HParser                          /* http header parser pair stored in table */
-{
-        const char     *name;           /* name of header used for searching in table */
-        void          (*parse)(HConnection *, const char *value);       /* parser function */
 };
 
 struct HRange                           /* http range header first value */
@@ -182,8 +175,6 @@ static int              parsemethod(HConnection *);
 static int              parseuri(HConnection *);
 static int              parseversion(HConnection *);
 static int              parseheaders(HConnection *);
-static HParser         *findhparser(const char *name);
-static int              hparsercmp(const void *name, const void *parser);
 static void             parseconnection(HConnection *, const char *);
 static void             parseifmodsince(HConnection *, const char *);
 static void             parserange(HConnection *, const char *);
@@ -211,13 +202,6 @@ static void             logerror(const char *, ...);
 static void             vlogerror(const char *, va_list);
 static void             die(const char *, ...);
 static void             cleanup(void);
-
-static HParser hparsers[] =     /* keep sorted */
-{
-        { "connection",         parseconnection },
-        { "if-modified-since",  parseifmodsince },
-        { "range",              parserange      },
-};
 
 static MimeType mimetypes[] =   /* keep sorted by extension */
 {
@@ -810,7 +794,6 @@ static int parseheaders(HConnection *conn)
         Buffer *buf = &conn->buf;
         int i, c;
         char *name, *value;
-        HParser *parser;
 
         for (i = 0; i < MAXHEADERS; i++) {
                 bufclear(buf);
@@ -834,22 +817,17 @@ static int parseheaders(HConnection *conn)
                         return 400;     /* malformed header */
 
                 *value++ = '\0';        /* null-terminate name string */
+                value = strtrim(value);
 
-                if ((parser = findhparser(name)))
-                        parser->parse(conn, strtrim(value));
+                if (strcasecmp("connection", name) == 0)
+                        parseconnection(conn, value);
+                else if (strcasecmp("if-modified-since", name) == 0)
+                        parseifmodsince(conn, value);
+                else if (strcasecmp("range", name) == 0)
+                        parserange(conn, value);
         }
 
         return i < MAXHEADERS ? 200 : 431;
-}
-
-static HParser *findhparser(const char *name)
-{
-        return bsearch(name, hparsers, ARRAYLEN(hparsers), sizeof(*hparsers), hparsercmp);
-}
-
-static int hparsercmp(const void *name, const void *parser)
-{
-        return strcasecmp((const char *)name, ((const HParser *)parser)->name);
 }
 
 static void parseconnection(HConnection *conn, const char *value)
