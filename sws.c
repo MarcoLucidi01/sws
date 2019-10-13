@@ -605,7 +605,6 @@ static void handlereq(int client)
                 conn->reqsleft--;
                 buildresp(conn);
                 sendresp(conn);
-                fflush(conn->out);
                 logconnection(conn);
 
         } while (conn->req.keepalive && conn->reqsleft > 0);
@@ -1123,7 +1122,7 @@ static int sendresp(HConnection *conn)
         fputs("\r\n", conn->out);
 
         if (strcmp("HEAD", req->method) == 0)
-                return resp->status;
+                goto done;
 
         /*
          * error or generated response
@@ -1132,7 +1131,7 @@ static int sendresp(HConnection *conn)
         if ((resp->status != 200 && resp->status != 206) || resp->file == NULL) {
                 p = resp->status == 206 ? resp->content.data + range->start : resp->content.data;
                 resp->sent = fwrite(p, 1, contentlen, conn->out);
-                return resp->status;
+                goto done;
         }
 
         /*
@@ -1152,6 +1151,8 @@ static int sendresp(HConnection *conn)
                 resp->sent += n;
         }
 
+done:
+        fflush(conn->out);
         return resp->status;
 }
 
