@@ -392,6 +392,7 @@ static void parseargs(Args *args, int argc, char *const *argv)
 {
         int opt;
 
+        memset(args, 0, sizeof(*args));
         while ((opt = getopt(argc, argv, "a:p:r:i:hv")) != -1) {
                 switch (opt) {
                 case 'a':
@@ -476,7 +477,7 @@ static void setuprootpath(const Args *args)
 {
         Buffer buf;
 
-        if (args->rootpath && chdir(args->rootpath) != 0)
+        if (args->rootpath != NULL && chdir(args->rootpath) != 0)
                 die("chdir: %s", strerror(errno));
 
         bufinit(&buf);
@@ -1401,8 +1402,6 @@ static void cleanup(void)
 int main(int argc, char **argv)
 {
         Args args;
-
-        memset(&args, 0, sizeof(args));
 
         parseargs(&args, argc, argv);
         if (args.help)
