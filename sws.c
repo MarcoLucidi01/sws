@@ -123,7 +123,6 @@ struct HRequest                         /* http request aka req */
         int             keepalive;      /* connection header (1 keep-alive, 0 close) */
         time_t          ifmodsince;     /* if modified since header timestamp */
         HRange          range;
-        long            contentlen;     /* request payload length. If present will be skipped */
 };
 
 struct HResponse                        /* http response aka resp */
@@ -186,7 +185,6 @@ static int              parseheaders(HConnection *);
 static HParser         *findhparser(const char *name);
 static int              hparsercmp(const void *name, const void *parser);
 static void             parseconnection(HConnection *, const char *);
-static void             parsecontentlen(HConnection *, const char *);
 static void             parseifmodsince(HConnection *, const char *);
 static void             parserange(HConnection *, const char *);
 static int              buildresp(HConnection *);
@@ -217,7 +215,6 @@ static void             cleanup(void);
 static HParser hparsers[] =     /* keep sorted */
 {
         { "connection",         parseconnection },
-        { "content-length",     parsecontentlen },
         { "if-modified-since",  parseifmodsince },
         { "range",              parserange      },
 };
@@ -675,7 +672,6 @@ static void hclear(HConnection *conn)
         conn->req.ifmodsince  = (time_t)-1;
         conn->req.range.start = -1;
         conn->req.range.end   = -1;
-        conn->req.contentlen  = -1;
         conn->resp.status     = 500;
         conn->resp.sent       = 0;
         conn->resp.filesize   = -1;
@@ -859,14 +855,6 @@ static int hparsercmp(const void *name, const void *parser)
 static void parseconnection(HConnection *conn, const char *value)
 {
         conn->req.keepalive = strcmp(value, "keep-alive") == 0;
-}
-
-static void parsecontentlen(HConnection *conn, const char *value)
-{
-        long clen = atol(value);
-
-        if (clen > 0)
-                conn->req.contentlen = clen;
 }
 
 static void parseifmodsince(HConnection *conn, const char *value)
