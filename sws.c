@@ -145,15 +145,6 @@ struct MimeType                         /* mime type pair stored in table */
         const char     *mime;           /* mime type string */
 };
 
-static void             bufinit(Buffer *);
-static int              bufputs(Buffer *, const char *);
-static int              bufputc(Buffer *, int);
-static int              bufvprintf(Buffer *, const char *, va_list ap, va_list apcopy);
-static int              bufreserve(Buffer *, size_t);
-static size_t           bufavailable(Buffer *);
-static void             bufclear(Buffer *);
-static void             buftruncate(Buffer *, size_t);
-static void             bufdeinit(Buffer *);
 static void             parseargs(Args *, int argc, char *const *argv);
 static void             initsrv(const Args *);
 static void             setuputctz(void);
@@ -202,6 +193,15 @@ static void             logerror(const char *, ...);
 static void             vlogerror(const char *, va_list);
 static void             die(const char *, ...);
 static void             cleanup(void);
+static void             bufinit(Buffer *);
+static int              bufputs(Buffer *, const char *);
+static int              bufputc(Buffer *, int);
+static int              bufvprintf(Buffer *, const char *, va_list ap, va_list apcopy);
+static int              bufreserve(Buffer *, size_t);
+static size_t           bufavailable(Buffer *);
+static void             bufclear(Buffer *);
+static void             buftruncate(Buffer *, size_t);
+static void             bufdeinit(Buffer *);
 
 static MimeType mimetypes[] =   /* keep sorted by extension */
 {
@@ -279,94 +279,22 @@ static MimeType mimetypes[] =   /* keep sorted by extension */
 
 static struct Server server;            /* global server informations */
 
-static void bufinit(Buffer *buf)
+int main(int argc, char **argv)
 {
-        buf->cap = 0;
-        buf->len = 0;
-        buf->data = NULL;
-}
+        Args args;
 
-static int bufputs(Buffer *buf, const char *s)
-{
-        while (*s)
-                if (bufputc(buf, *s++) == -1)
-                        return -1;
+        parseargs(&args, argc, argv);
+        if (args.help)
+                die(USAGE);
+        if (args.version)
+                die(VERSION);
+
+        initsrv(&args);
+        logsrvinfo();
+        run();
+        cleanup();
 
         return 0;
-}
-
-static int bufputc(Buffer *buf, int c)
-{
-        if (bufavailable(buf) == 0 && bufreserve(buf, 1) == -1)
-                return -1;
-
-        buf->data[buf->len++] = c;
-        return 0;
-}
-
-/*
- * In c89 we don't have va_copy, so we take 2 va_list started by the caller.
- * Ugly but works.
- */
-static int bufvprintf(Buffer *buf, const char *fmt, va_list ap, va_list apcopy)
-{
-        int prilen;
-
-        if (bufavailable(buf) == 0 && bufreserve(buf, 1) == -1)
-                return -1;
-
-        if ((prilen = vsnprintf(buf->data + buf->len, bufavailable(buf), fmt, ap)) < 0)
-                return -1;
-
-        if ((unsigned int)prilen >= bufavailable(buf)) {
-                if (bufreserve(buf, prilen + 1) == -1)
-                        return -1;
-
-                if ((prilen = vsnprintf(buf->data + buf->len, bufavailable(buf), fmt, apcopy)) < 0)
-                        return -1;
-        }
-
-        buf->len += prilen;
-        return prilen;
-}
-
-static int bufreserve(Buffer *buf, size_t n)
-{
-        size_t newcap;
-        char *p;
-
-        if (bufavailable(buf) >= n)
-                return 0;
-
-        newcap = buf->cap + MAX(BUFCHUNK, (n - bufavailable(buf)));
-
-        if ((p = realloc(buf->data, newcap)) == NULL)
-                return -1;
-
-        buf->cap = newcap;
-        buf->data = p;
-        return 0;
-}
-
-static size_t bufavailable(Buffer *buf)
-{
-        return buf->cap - buf->len;
-}
-
-static void bufclear(Buffer *buf)
-{
-        buftruncate(buf, 0);
-}
-
-static void buftruncate(Buffer *buf, size_t newlen)
-{
-        if (buf->len > newlen)
-                buf->len = newlen;
-}
-
-static void bufdeinit(Buffer *buf)
-{
-        free(buf->data);
 }
 
 static void parseargs(Args *args, int argc, char *const *argv)
@@ -1366,20 +1294,92 @@ static void cleanup(void)
         free(server.rootpath);
 }
 
-int main(int argc, char **argv)
+static void bufinit(Buffer *buf)
 {
-        Args args;
+        buf->cap = 0;
+        buf->len = 0;
+        buf->data = NULL;
+}
 
-        parseargs(&args, argc, argv);
-        if (args.help)
-                die(USAGE);
-        if (args.version)
-                die(VERSION);
-
-        initsrv(&args);
-        logsrvinfo();
-        run();
-        cleanup();
+static int bufputs(Buffer *buf, const char *s)
+{
+        while (*s)
+                if (bufputc(buf, *s++) == -1)
+                        return -1;
 
         return 0;
+}
+
+static int bufputc(Buffer *buf, int c)
+{
+        if (bufavailable(buf) == 0 && bufreserve(buf, 1) == -1)
+                return -1;
+
+        buf->data[buf->len++] = c;
+        return 0;
+}
+
+/*
+ * In c89 we don't have va_copy, so we take 2 va_list started by the caller.
+ * Ugly but works.
+ */
+static int bufvprintf(Buffer *buf, const char *fmt, va_list ap, va_list apcopy)
+{
+        int prilen;
+
+        if (bufavailable(buf) == 0 && bufreserve(buf, 1) == -1)
+                return -1;
+
+        if ((prilen = vsnprintf(buf->data + buf->len, bufavailable(buf), fmt, ap)) < 0)
+                return -1;
+
+        if ((unsigned int)prilen >= bufavailable(buf)) {
+                if (bufreserve(buf, prilen + 1) == -1)
+                        return -1;
+
+                if ((prilen = vsnprintf(buf->data + buf->len, bufavailable(buf), fmt, apcopy)) < 0)
+                        return -1;
+        }
+
+        buf->len += prilen;
+        return prilen;
+}
+
+static int bufreserve(Buffer *buf, size_t n)
+{
+        size_t newcap;
+        char *p;
+
+        if (bufavailable(buf) >= n)
+                return 0;
+
+        newcap = buf->cap + MAX(BUFCHUNK, (n - bufavailable(buf)));
+
+        if ((p = realloc(buf->data, newcap)) == NULL)
+                return -1;
+
+        buf->cap = newcap;
+        buf->data = p;
+        return 0;
+}
+
+static size_t bufavailable(Buffer *buf)
+{
+        return buf->cap - buf->len;
+}
+
+static void bufclear(Buffer *buf)
+{
+        buftruncate(buf, 0);
+}
+
+static void buftruncate(Buffer *buf, size_t newlen)
+{
+        if (buf->len > newlen)
+                buf->len = newlen;
+}
+
+static void bufdeinit(Buffer *buf)
+{
+        free(buf->data);
 }
