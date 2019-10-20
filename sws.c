@@ -238,7 +238,7 @@ static MimeType mimetypes[] =   /* keep sorted by extension */
         { "midi",       "audio/midi" },
         { "mjs",        "application/javascript" },
         { "mp3",        "audio/mpeg" },
-        { "mp4",        "video/mpeg" },
+        { "mp4",        "video/mp4" },
         { "mpeg",       "video/mpeg" },
         { "odp",        "application/vnd.oasis.opendocument.presentation" },
         { "ods",        "application/vnd.oasis.opendocument.spreadsheet" },
