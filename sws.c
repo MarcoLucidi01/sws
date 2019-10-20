@@ -334,6 +334,7 @@ static void parseargs(Args *args, int argc, char *const *argv)
 
 static void initsrv(const Args *args)
 {
+        setvbuf(stdout, NULL, _IOLBF, 0);       /* line buffer even when stdout is not a terminal */
         setuputctz();
         setupsock(args);
         setuprootpath(args);
