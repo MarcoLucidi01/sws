@@ -52,8 +52,8 @@
                         "  -v  version"
 #define VERSION         "0.6.0"
 #define DEFAULTPORT     "8080"
-#define DEFAULTBACKLOG  10
 #define DEFAULTINDEX    "index.html"
+#define BACKLOG         10              /* backlog argument for listen() syscall */
 #define CONNTIMEOUT     30              /* seconds a connection is allowed to remain in idle */
 #define CONNMAXREQS     200             /* max number of requests allowed on a single connection */
 #define METHODMAX       8               /* request method max size */
@@ -441,7 +441,7 @@ static void setupsock(const Args *args)
                         close(server.sock);
                         continue;
                 }
-                if (listen(server.sock, DEFAULTBACKLOG) == -1) {
+                if (listen(server.sock, BACKLOG) == -1) {
                         close(server.sock);
                         continue;
                 }
