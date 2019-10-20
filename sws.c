@@ -301,7 +301,13 @@ static void parseargs(Args *args, int argc, char *const *argv)
 {
         int opt;
 
-        memset(args, 0, sizeof(*args));
+        args->address   = NULL;
+        args->port      = DEFAULTPORT;
+        args->rootpath  = ".";
+        args->index     = DEFAULTINDEX;
+        args->help      = 0;
+        args->version   = 0;
+
         while ((opt = getopt(argc, argv, "a:p:r:i:hv")) != -1) {
                 switch (opt) {
                 case 'a':
@@ -332,7 +338,7 @@ static void initsrv(const Args *args)
         setupsock(args);
         setuprootpath(args);
         setupsighandler();
-        server.index = args->index ? args->index : DEFAULTINDEX;
+        server.index = args->index;
 }
 
 static void setuputctz(void)
@@ -352,7 +358,7 @@ static void setupsock(const Args *args)
         hints.ai_socktype = SOCK_STREAM;
         hints.ai_flags    = AI_PASSIVE;
 
-        err = getaddrinfo(args->address, args->port ? args->port : DEFAULTPORT, &hints, &info);
+        err = getaddrinfo(args->address, args->port, &hints, &info);
         if (err)
                 die("getaddrinfo: %s", gai_strerror(err));
 
@@ -386,7 +392,7 @@ static void setuprootpath(const Args *args)
 {
         Buffer buf;
 
-        if (args->rootpath != NULL && chdir(args->rootpath) != 0)
+        if (chdir(args->rootpath) != 0)
                 die("chdir: %s", strerror(errno));
 
         bufinit(&buf);
