@@ -999,7 +999,7 @@ static int sendresp(HConnection *conn)
         range = (req->range.start != -1 || req->range.end != -1) ? &req->range : NULL;
         if (resp->status == 200 && range && fixhrange(range, contentlen) == 0) {
                 addheader(conn, "Content-Range", "bytes %ld-%ld/%lu", range->start, range->end, contentlen);
-                contentlen = range->end - range->start;
+                contentlen = range->end - range->start + 1;
                 resp->status = 206;
         }
 
@@ -1065,10 +1065,10 @@ static int fixhrange(HRange *range, long contentlen)
                 return 0;
 
         if (start != -1)
-                end = end != -1 ? MIN(contentlen, end + 1) : contentlen;
+                end = end != -1 ? MIN(contentlen - 1, end) : contentlen - 1;
         else {
                 start = contentlen - end;
-                end = contentlen;
+                end = contentlen - 1;
         }
 
         if (start < 0 || start > end)
