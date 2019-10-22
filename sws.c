@@ -115,7 +115,7 @@ struct HRequest                         /* http request aka req */
         char            method[METHODMAX];
         char           *uri;            /* decoded request uri */
         int             keepalive;      /* connection header (1 keep-alive, 0 close) */
-        time_t          ifmodsince;     /* if modified since header timestamp */
+        char            ifmodsince[DATEMAX];    /* if modified since header value */
         HRange          range;
 };
 
@@ -148,7 +148,6 @@ struct MimeType                         /* mime type pair stored in table */
 
 static void             parseargs(Args *, int, char *const *);
 static void             initsrv(const Args *);
-static void             setuputctz(void);
 static void             setupsock(const Args *);
 static void             setuprootpath(const Args *);
 static void             setupsighandler(void);
@@ -184,7 +183,6 @@ static int              addheader(HConnection *, const char *, const char *, ...
 static char            *uridecode(char *);
 static char            *uriencode(const char *, char *, size_t);
 static char            *time2hdate(time_t, char *, size_t);
-static time_t           hdate2time(const char *);
 static const char      *parsemimetype(const char *, FILE *);
 static int              mimetypecmp(const void *, const void *);
 static void             logconnection(const HConnection *);
@@ -336,18 +334,10 @@ static void parseargs(Args *args, int argc, char *const *argv)
 static void initsrv(const Args *args)
 {
         setvbuf(stdout, NULL, _IOLBF, 0);       /* line buffer even when stdout is not a terminal */
-        setuputctz();
         setupsock(args);
         setuprootpath(args);
         setupsighandler();
         server.index = args->index;
-}
-
-static void setuputctz(void)
-{
-        if (setenv("TZ", "UTC", 1) == -1)
-                die("setenv: %s", strerror(errno));
-        tzset();
 }
 
 static void setupsock(const Args *args)
@@ -400,7 +390,7 @@ static void setuprootpath(const Args *args)
         bufinit(&buf);
         for (;;) {
                 if (bufreserve(&buf, buf.cap + BUFCHUNK) == -1)
-                        die("buf_reserve: %s", strerror(errno));
+                        die("bufreserve: %s", strerror(errno));
 
                 server.rootpath = buf.data;
                 if (getcwd(server.rootpath, buf.cap))
@@ -586,15 +576,15 @@ static int setsocktimeout(int sock, time_t sec)
 
 static void hclear(HConnection *conn)
 {
-        conn->req.timestamp   = (time_t)-1;
-        conn->req.method[0]   = '\0';
-        conn->req.keepalive   = 0;
-        conn->req.ifmodsince  = (time_t)-1;
-        conn->req.range.start = -1;
-        conn->req.range.end   = -1;
-        conn->resp.status     = 500;
-        conn->resp.sent       = 0;
-        conn->resp.filesize   = -1;
+        conn->req.timestamp     = (time_t)-1;
+        conn->req.method[0]     = '\0';
+        conn->req.keepalive     = 0;
+        conn->req.ifmodsince[0] = '\0';
+        conn->req.range.start   = -1;
+        conn->req.range.end     = -1;
+        conn->resp.status       = 500;
+        conn->resp.sent         = 0;
+        conn->resp.filesize     = -1;
 
         free(conn->req.uri);
         conn->req.uri = NULL;
@@ -773,7 +763,10 @@ static void parseconnection(HConnection *conn, const char *value)
 
 static void parseifmodsince(HConnection *conn, const char *value)
 {
-        conn->req.ifmodsince = hdate2time(value);
+        size_t len = MIN(strlen(value), sizeof(conn->req.ifmodsince) - 1);
+
+        memcpy(conn->req.ifmodsince, value, len);
+        conn->req.ifmodsince[len] = '\0';
 }
 
 static void parserange(HConnection *conn, const char *value)
@@ -857,10 +850,11 @@ static int buildresperror(HConnection *conn, int errstatus)
 
 static int buildrespfile(HConnection *conn, const char *path, const struct stat *finfo)
 {
-        char hdate[DATEMAX];
+        char lastmod[DATEMAX];
         FILE *f;
 
-        if (conn->req.ifmodsince != -1 && difftime(finfo->st_mtime, conn->req.ifmodsince) <= 0.0) {
+        time2hdate(finfo->st_mtime, lastmod, sizeof(lastmod));
+        if (conn->req.ifmodsince[0] != '\0' && strcmp(lastmod, conn->req.ifmodsince) == 0) {
                 conn->resp.status = 304;
                 return 304;
         }
@@ -869,7 +863,7 @@ static int buildrespfile(HConnection *conn, const char *path, const struct stat 
                 return buildresperror(conn, 403);
 
         addheader(conn, "Accept-Ranges", "bytes");
-        addheader(conn, "Last-Modified", "%s", time2hdate(finfo->st_mtime, hdate, sizeof(hdate)));
+        addheader(conn, "Last-Modified", "%s", lastmod);
         addheader(conn, "Content-Type", "%s", parsemimetype(path, f));
 
         conn->resp.file = f;
@@ -1171,19 +1165,6 @@ static char *time2hdate(time_t time, char *buf, size_t size)
 {
         strftime(buf, size, HDATEFMT, gmtime(&time));;
         return buf;
-}
-
-static time_t hdate2time(const char *hdate)
-{
-        struct tm tm;
-        char *ret;
-
-        memset(&tm, 0, sizeof(tm));
-        ret = strptime(hdate, HDATEFMT, &tm);
-        if (ret == NULL || *ret != '\0')
-                return -1;
-
-        return mktime(&tm);
 }
 
 static const char *parsemimetype(const char *fname, FILE *f)
