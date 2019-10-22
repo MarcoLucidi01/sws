@@ -61,6 +61,7 @@
 #define HEADERMAX       4096            /* single request header max size */
 #define MAXHEADERS      100             /* max number of request headers allowed */
 #define HDATEFMT        "%a, %d %b %Y %H:%M:%S GMT"     /* http date format for strftime */
+#define DATEMAX         64              /* size for date buffers (both log and http) */
 #define BUFCHUNK        256             /* minimum buffer capacity increment */
 
 #define ARRAYLEN(a)     (sizeof((a)) / sizeof((a)[0]))
@@ -856,7 +857,7 @@ static int buildresperror(HConnection *conn, int errstatus)
 
 static int buildrespfile(HConnection *conn, const char *path, const struct stat *finfo)
 {
-        char hdate[32];
+        char hdate[DATEMAX];
         FILE *f;
 
         if (conn->req.ifmodsince != -1 && difftime(finfo->st_mtime, conn->req.ifmodsince) <= 0.0) {
@@ -940,7 +941,7 @@ static int buildrespdirlist(HConnection *conn, const char *path, struct dirent *
 {
         Buffer *buf = &conn->buf;
         struct stat finfo;
-        char mtime[32];
+        char mtime[DATEMAX];
         const char *title, *fname, *fmt;
         int i;
 
@@ -989,7 +990,7 @@ static int buildrespdirlist(HConnection *conn, const char *path, struct dirent *
 static int sendresp(HConnection *conn)
 {
         unsigned long contentlen, tosend, n;
-        char hdate[32], *p;
+        char hdate[DATEMAX], *p;
         HRange *range;
         HRequest *req = &conn->req;
         HResponse *resp = &conn->resp;
@@ -1212,7 +1213,7 @@ static int mimetypecmp(const void *ext, const void *mimetype)
 
 static void logconnection(const HConnection *conn)
 {
-        char address[INET6_ADDRSTRLEN], port[6], date[64];
+        char address[INET6_ADDRSTRLEN], port[6], date[DATEMAX];
 
         address[0] = port[0] = date[0] = '\0';
         ssinetntop(&conn->addr, address, port);
