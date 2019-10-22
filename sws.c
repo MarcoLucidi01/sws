@@ -182,7 +182,7 @@ static int              hprintf(HConnection *, const char *, ...);
 static int              addheader(HConnection *, const char *, const char *, ...);
 static char            *uridecode(char *);
 static char            *uriencode(const char *, char *, size_t);
-static char            *time2hdate(time_t, char *, size_t);
+static char            *time2hdate(time_t, char *);
 static const char      *parsemimetype(const char *, FILE *);
 static int              mimetypecmp(const void *, const void *);
 static void             logconnection(const HConnection *);
@@ -853,7 +853,7 @@ static int buildrespfile(HConnection *conn, const char *path, const struct stat 
         char lastmod[DATEMAX];
         FILE *f;
 
-        time2hdate(finfo->st_mtime, lastmod, sizeof(lastmod));
+        time2hdate(finfo->st_mtime, lastmod);
         if (conn->req.ifmodsince[0] != '\0' && strcmp(lastmod, conn->req.ifmodsince) == 0) {
                 conn->resp.status = 304;
                 return 304;
@@ -1006,7 +1006,7 @@ static int sendresp(HConnection *conn)
                 addheader(conn, "Connection", "close");
 
         addheader(conn, "Content-Length", "%lu", contentlen);
-        addheader(conn, "Date", "%s", time2hdate(time(NULL), hdate, sizeof(hdate)));
+        addheader(conn, "Date", "%s", time2hdate(time(NULL), hdate));
         addheader(conn, "Server", "sws " VERSION);
 
         /*
@@ -1161,9 +1161,9 @@ static char *uriencode(const char *s, char *buf, size_t size)
         return buf;
 }
 
-static char *time2hdate(time_t time, char *buf, size_t size)
+static char *time2hdate(time_t time, char *buf)
 {
-        strftime(buf, size, HDATEFMT, gmtime(&time));;
+        strftime(buf, DATEMAX, HDATEFMT, gmtime(&time));;
         return buf;
 }
 
