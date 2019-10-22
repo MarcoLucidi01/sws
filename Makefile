@@ -1,17 +1,23 @@
 .POSIX:
 
 CC     := cc
-CFLAGS := -std=c89 -O3 -g -pedantic -Wall -Wextra -Werror -D_POSIX_C_SOURCE=200809L
+CFLAGS := -std=c89 -pedantic -Wall -Wextra -Werror -D_POSIX_C_SOURCE=200809L
 PREFIX := /usr/local
 
-all: sws
+all: sws.debug
+
+sws.debug: sws.c
+	$(CC) $(CFLAGS) -g -DDEBUG $^ -o $@
+
 sws: sws.c
+	$(CC) $(CFLAGS) -DNDEBUG $^ -o $@
 
 install: sws
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
 	cp sws $(DESTDIR)$(PREFIX)/bin
+
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/bin/sws
+	rm $(DESTDIR)$(PREFIX)/bin/sws
 
 clean:
-	rm -f sws
+	rm -f sws sws.debug
