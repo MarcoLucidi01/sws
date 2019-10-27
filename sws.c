@@ -839,7 +839,7 @@ static int buildresp(HConnection *conn)
 
 static int buildresperror(HConnection *conn, int errstatus)
 {
-        hprintf(conn, "<!DOCTYPE html><title>%d %s</title><h1>%d %s</h1>",
+        hprintf(conn, "<!DOCTYPE html><meta charset=\"utf-8\"/><title>%d %s</title><h1>%d %s</h1>",
                 errstatus, strstatus(errstatus), errstatus, strstatus(errstatus));
 
         addheader(conn, "Content-Type", "text/html");
@@ -940,7 +940,7 @@ static int buildrespdirlist(HConnection *conn, const char *path, struct dirent *
         int i;
 
         title = strcmp(path, "./") == 0 ? "" : path;
-        hprintf(conn, "<!DOCTYPE html><style>"
+        hprintf(conn, "<!DOCTYPE html><meta charset=\"utf-8\"/><style>"
                       "table { border-collapse: collapse; }"
                       "td { border: 1px solid #ddd; padding: 10px; }"
                       "tr:nth-child(odd) { background-color: #f2f2f2; }"
