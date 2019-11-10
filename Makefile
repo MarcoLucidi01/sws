@@ -10,11 +10,11 @@ sws.debug: sws.c
 	$(CC) $(CFLAGS) -g -DDEBUG $^ -o $@
 
 sws: sws.c
-	$(CC) $(CFLAGS) -DNDEBUG $^ -o $@
+	$(CC) $(CFLAGS) $^ -o $@
 
 install: sws
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
-	cp sws $(DESTDIR)$(PREFIX)/bin
+	install -m 755 sws $(DESTDIR)$(PREFIX)/bin
 
 uninstall:
 	rm $(DESTDIR)$(PREFIX)/bin/sws
