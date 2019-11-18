@@ -51,7 +51,9 @@
                         "  -h  help message\n" \
                         "  -v  version"
 #define VERSION         "0.6.0"
+#define DEFAULTADDRESS  NULL            /* to get wildcard address from getaddrinfo() if address is not specified */
 #define DEFAULTPORT     "8080"
+#define DEFAULTROOTPATH "."             /* current working directory */
 #define DEFAULTINDEX    "index.html"
 #define BACKLOG         10              /* backlog argument for listen() syscall */
 #define CONNTIMEOUT     30              /* seconds a connection is allowed to remain in idle */
@@ -300,9 +302,9 @@ static void parseargs(Args *args, int argc, char *const *argv)
 {
         int opt;
 
-        args->address   = NULL;
+        args->address   = DEFAULTADDRESS;
         args->port      = DEFAULTPORT;
-        args->rootpath  = ".";
+        args->rootpath  = DEFAULTROOTPATH;
         args->index     = DEFAULTINDEX;
         args->help      = 0;
         args->version   = 0;
