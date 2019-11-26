@@ -524,42 +524,38 @@ static void handlereq(int client)
 
 static HConnection *hopen(int client)
 {
-        HConnection *conn;
+        HConnection *conn = NULL;
         socklen_t addrlen = sizeof(SockaddrStorage);
-        int outfd;
+        int outfd = -1;
 
-        if (setsocktimeout(client, CONNTIMEOUT) == -1)
-                goto errtimeout;
-        if ((conn = malloc(sizeof(*conn))) == NULL)
-                goto errconn;
-        if (getpeername(client, (struct sockaddr *)&conn->addr, &addrlen) == -1)
-                goto erraddr;
-        if ((conn->in = fdopen(client, "r")) == NULL)
-                goto errin;
-        if ((outfd = dup(client)) == -1)
-                goto erroutfd;
-        if ((conn->out = fdopen(outfd, "w")) == NULL)
-                goto errout;
+        if (setsocktimeout(client, CONNTIMEOUT) == -1
+        || (conn = malloc(sizeof(*conn))) == NULL
+        || (conn->in = fdopen(client, "r")) == NULL
+        || getpeername(client, (struct sockaddr *)&conn->addr, &addrlen) == -1
+        || (outfd = dup(client)) == -1
+        || (conn->out = fdopen(outfd, "w")) == NULL)
+                goto error;
 
-        conn->reqsleft = CONNMAXREQS;
-        conn->req.uri = NULL;
+        conn->reqsleft  = CONNMAXREQS;
+        conn->req.uri   = NULL;
         conn->resp.file = NULL;
+
         bufinit(&conn->resp.headers);
         bufinit(&conn->resp.content);
         bufinit(&conn->buf);
 
         hclear(conn);
-
         return conn;
-errout:
-        close(outfd);
-erroutfd:
-        fclose(conn->in);
-errin:
-erraddr:
-        free(conn);
-errconn:
-errtimeout:
+
+error:
+        if (conn != NULL) {
+                if (conn->in != NULL)
+                        fclose(conn->in);
+                free(conn);
+        }
+        if (outfd != -1)
+                close(outfd);
+
         return NULL;
 }
 
