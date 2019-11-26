@@ -587,7 +587,7 @@ static void hclear(HConnection *conn)
         free(conn->req.uri);
         conn->req.uri = NULL;
 
-        if (conn->resp.file)
+        if (conn->resp.file != NULL)
                 fclose(conn->resp.file);
         conn->resp.file = NULL;
 
@@ -851,7 +851,7 @@ static int buildrespfile(HConnection *conn, const char *path, const struct stat 
         FILE *f;
 
         time2hdate(finfo->st_mtime, lastmod);
-        if (conn->req.ifmodsince[0] != '\0' && strcmp(lastmod, conn->req.ifmodsince) == 0) {
+        if (strcmp(lastmod, conn->req.ifmodsince) == 0) {
                 conn->resp.status = 304;
                 return 304;
         }
@@ -1031,7 +1031,7 @@ static int sendresp(HConnection *conn)
         tosend = contentlen;
         resp->bsent = 0;
         bufreserve(buf, MIN(tosend, BUFSIZ));
-        while (tosend && ! ferror(resp->file) && ! feof(resp->file) && ! ferror(conn->out) && ! feof(conn->out)) {
+        while (tosend > 0 && isalive(conn) && ! ferror(resp->file) && ! feof(resp->file)) {
                 n = fread(buf->data, 1, MIN(tosend, buf->cap), resp->file);
                 n = fwrite(buf->data, 1, n, conn->out);
                 tosend -= n;
@@ -1086,7 +1086,7 @@ static int addheader(HConnection *conn, const char *name, const char *value, ...
         va_list ap, apcopy;
         int ret;
 
-        if (bufputs(buf, name) || bufputs(buf, ": ") == -1)
+        if (bufputs(buf, name) == -1 || bufputs(buf, ": ") == -1)
                 return 500;
 
         va_start(ap, value);
@@ -1154,7 +1154,7 @@ static char *uriencode(const char *s, char *buf, size_t size)
 
 static char *time2hdate(time_t time, char *buf)
 {
-        strftime(buf, DATEMAX, HDATEFMT, gmtime(&time));;
+        strftime(buf, DATEMAX, HDATEFMT, gmtime(&time));
         return buf;
 }
 
