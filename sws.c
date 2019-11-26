@@ -827,7 +827,7 @@ static int buildresp(HConnection *conn)
         if (*relpath == '\0')
                 relpath = "./";
 
-        if (lstat(relpath, &finfo) == -1)
+        if (stat(relpath, &finfo) == -1)
                 return buildresperror(conn, 404);
 
         if (S_ISREG(finfo.st_mode))
@@ -901,7 +901,7 @@ static int buildrespdir(HConnection *conn, const char *path)
         ||  bufputc(buf, '\0') == -1)
                 return buildresperror(conn, 500);
 
-        if (lstat(buf->data, &finfo) == 0 && S_ISREG(finfo.st_mode))
+        if (stat(buf->data, &finfo) == 0 && S_ISREG(finfo.st_mode))
                 return buildrespfile(conn, buf->data, &finfo);
 
         /*
