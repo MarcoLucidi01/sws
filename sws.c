@@ -129,7 +129,7 @@ struct HResponse                        /* http response aka resp */
         Buffer          content;        /* buffer for generated responses */
         FILE           *file;           /* file to send as response or NULL if sending generated response */
         long            filesize;       /* size of resp.file taken from stat */
-        size_t          sent;           /* number of payload bytes sent to client */
+        size_t          bsent;          /* number of payload bytes sent to client */
 };
 
 struct HConnection                      /* http connection aka conn */
@@ -585,7 +585,7 @@ static void hclear(HConnection *conn)
         conn->req.range.start   = -1;
         conn->req.range.end     = -1;
         conn->resp.status       = 500;
-        conn->resp.sent         = 0;
+        conn->resp.bsent        = 0;
         conn->resp.filesize     = -1;
 
         free(conn->req.uri);
@@ -1022,7 +1022,7 @@ static int sendresp(HConnection *conn)
          */
         if ((resp->status != 200 && resp->status != 206) || resp->file == NULL) {
                 p = resp->status == 206 ? resp->content.data + range->start : resp->content.data;
-                resp->sent = fwrite(p, 1, contentlen, conn->out);
+                resp->bsent = fwrite(p, 1, contentlen, conn->out);
                 goto done;
         }
 
@@ -1033,13 +1033,13 @@ static int sendresp(HConnection *conn)
                 fseek(resp->file, range->start, SEEK_SET);
 
         tosend = contentlen;
-        resp->sent = 0;
+        resp->bsent = 0;
         bufreserve(buf, MIN(tosend, BUFSIZ));
         while (tosend && ! ferror(resp->file) && ! feof(resp->file) && ! ferror(conn->out) && ! feof(conn->out)) {
                 n = fread(buf->data, 1, MIN(tosend, buf->cap), resp->file);
                 n = fwrite(buf->data, 1, n, conn->out);
                 tosend -= n;
-                resp->sent += n;
+                resp->bsent += n;
         }
 
 done:
@@ -1202,7 +1202,7 @@ static void logconnection(const HConnection *conn)
                conn->req.uri ? conn->req.uri : "",
                conn->resp.status,
                strstatus(conn->resp.status),
-               (unsigned long)conn->resp.sent);
+               (unsigned long)conn->resp.bsent);
 }
 
 static char *strtrim(char *s)
