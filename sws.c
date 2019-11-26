@@ -43,15 +43,16 @@
 #include <unistd.h>
 
 #define USAGE           "usage: sws -aprihv\n\n" \
-                        "Simple Small Static Stupid Whatever Web Server.\n\n" \
-                        "  -a  ip address\n" \
-                        "  -p  port\n" \
-                        "  -r  webroot\n" \
-                        "  -i  index page\n" \
+                        "Simple Small Static Stupid Whatever Web Server\n\n" \
+                        "  -a  bind address, default all interfaces\n" \
+                        "  -p  port, default 8080\n" \
+                        "  -r  rootpath, default current working directory\n" \
+                        "  -i  index page file name, default index.html\n" \
                         "  -h  help message\n" \
-                        "  -v  version"
+                        "  -v  version\n\n" \
+                        "repo: https://github.com/MarcoLucidi01/sws"
 #define VERSION         "0.6.0"
-#define DEFAULTADDRESS  NULL            /* to get wildcard address from getaddrinfo() if address is not specified */
+#define DEFAULTADDRESS  NULL            /* to get wildcard address from getaddrinfo() if address (-a) is not specified */
 #define DEFAULTPORT     "8080"
 #define DEFAULTROOTPATH "."             /* current working directory */
 #define DEFAULTINDEX    "index.html"
@@ -97,7 +98,7 @@ struct Args                             /* command line arguments */
         int             version;
 };
 
-struct Server                           /* server informations */
+struct Server                           /* server runtime informations */
 {
         int             sock;           /* server listening socket */
         int             running;        /* 1 if running, 0 if stopped */
@@ -137,9 +138,9 @@ struct HConnection                      /* http connection aka conn */
         FILE           *in;             /* input stream */
         FILE           *out;            /* output stream */
         int             reqsleft;       /* number of remaining requests allowed on this connection */
-        HRequest        req;
-        HResponse       resp;
-        Buffer          buf;            /* common buffer used e.g. for building file paths */
+        HRequest        req;            /* current request */
+        HResponse       resp;           /* current response */
+        Buffer          buf;            /* common reusable buffer used e.g. for building file paths */
 };
 
 struct MimeType                         /* mime type pair stored in table */
@@ -278,7 +279,7 @@ static MimeType mimetypes[] =   /* keep sorted by extension */
         { "zip",        "application/zip" },
 };
 
-static struct Server server;            /* global server informations */
+static struct Server server;            /* global server runtime informations */
 
 int main(int argc, char **argv)
 {
@@ -449,7 +450,7 @@ static void logsrvinfo(void)
 
         ssinetntop(&ss, address, port);
 
-        printf("serving %s at %s:%s pid is %ld\n",
+        printf("serving %s at http://%s:%s pid is %ld\n",
                server.rootpath,
                address,
                port,
@@ -566,9 +567,8 @@ static int setsocktimeout(int sock, time_t sec)
 {
         struct timeval timeout;
 
-        timeout.tv_sec  = sec;
+        timeout.tv_sec = sec;
         timeout.tv_usec = 0;
-
         if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0
         &&  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) == 0)
                 return 0;
@@ -626,9 +626,9 @@ static int recvreq(HConnection *conn)
          * stop at first return value != 200
          */
         if (ret != 200
-        ||  (ret = parseuri(conn))     != 200
-        ||  (ret = parseversion(conn)) != 200
-        ||  (ret = parseheaders(conn)) != 200) {
+        || (ret = parseuri(conn))     != 200
+        || (ret = parseversion(conn)) != 200
+        || (ret = parseheaders(conn)) != 200) {
         }
 
         conn->resp.status = ret;
@@ -644,7 +644,6 @@ static int parsemethod(HConnection *conn)
         while ((c = fgetc(conn->in)) != EOF) {
                 if (c == ' ' || ! isupper(c) || len == sizeof(buf) - 1)
                         break;
-
                 buf[len++] = c;
         }
         if (len == 0 || c != ' ')
@@ -885,7 +884,6 @@ static int buildrespdir(HConnection *conn, const char *path)
         /*
          * redirect if directory path doesn't end with /
          */
-
         if (path[pathlen - 1] != '/') {
                 if (bufreserve(buf, pathlen * 3 + 1) == -1)
                         return buildresperror(conn, 500);
@@ -897,7 +895,6 @@ static int buildrespdir(HConnection *conn, const char *path)
         /*
          * try index file
          */
-
         bufclear(buf);
         if (bufputs(buf, path) == -1
         ||  bufputs(buf, server.index) == -1
@@ -910,7 +907,6 @@ static int buildrespdir(HConnection *conn, const char *path)
         /*
          * directory listing
          */
-
         if ((n = scandir(path, &entries, scandirfilter, scandircmp)) == -1)
                 return buildresperror(conn, 404);
 
@@ -943,11 +939,11 @@ static int buildrespdirlist(HConnection *conn, const char *path, struct dirent *
 
         title = strcmp(path, "./") == 0 ? "" : path;
         hprintf(conn, "<!DOCTYPE html><meta charset=\"utf-8\"/><style>"
-                      "table { border-collapse: collapse; }"
-                      "td { border: 1px solid #ddd; padding: 10px; }"
-                      "tr:nth-child(odd) { background-color: #f2f2f2; }"
-                      "td:nth-child(3) { text-align: right }"
-                      "a { text-decoration: none }"
+                      " table { border-collapse: collapse; }"
+                      " td { border: 1px solid #ddd; padding: 10px; }"
+                      " tr:nth-child(odd) { background-color: #f2f2f2; }"
+                      " td:nth-child(3) { text-align: right }"
+                      " a { text-decoration: none }"
                       "</style><title>/%s</title><h1>/%s</h1><table>\n",
                       title, title);
 
@@ -1014,7 +1010,6 @@ static int sendresp(HConnection *conn)
         /*
          * response head
          */
-
         fprintf(conn->out, "HTTP/1.0 %d %s\r\n", resp->status, strstatus(resp->status));
         fwrite(resp->headers.data, 1, resp->headers.len, conn->out);
         fputs("\r\n", conn->out);
@@ -1025,7 +1020,6 @@ static int sendresp(HConnection *conn)
         /*
          * error or generated response
          */
-
         if ((resp->status != 200 && resp->status != 206) || resp->file == NULL) {
                 p = resp->status == 206 ? resp->content.data + range->start : resp->content.data;
                 resp->sent = fwrite(p, 1, contentlen, conn->out);
@@ -1035,7 +1029,6 @@ static int sendresp(HConnection *conn)
         /*
          * file response
          */
-
         if (resp->status == 206)
                 fseek(resp->file, range->start, SEEK_SET);
 
@@ -1221,7 +1214,6 @@ static char *strtrim(char *s)
                 ;
 
         len = strlen(s);
-
         if (len > 0) {
                 end = s + len - 1;
                 for (; end > s && (*end == ' ' || *end == '\t'); end--)
