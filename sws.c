@@ -74,6 +74,7 @@
 
 typedef struct Buffer           Buffer;
 typedef struct Args             Args;
+typedef struct Server           Server;
 typedef struct HRange           HRange;
 typedef struct HRequest         HRequest;
 typedef struct HResponse        HResponse;
@@ -279,7 +280,7 @@ static MimeType mimetypes[] =   /* keep sorted by extension */
         { "zip",        "application/zip" },
 };
 
-static struct Server server;            /* global server runtime informations */
+static Server server = { -1, 0, NULL, NULL };   /* global server runtime informations */
 
 int main(int argc, char **argv)
 {
@@ -1269,7 +1270,8 @@ static void die(const char *reason, ...)
 
 static void cleanup(void)
 {
-        close(server.sock);
+        if (server.sock != -1)
+                close(server.sock);
         free(server.rootpath);
 }
 
