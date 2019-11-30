@@ -23,6 +23,7 @@
  */
 
 #include <arpa/inet.h>
+#include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -878,6 +879,8 @@ static int buildrespdir(HConnection *conn, const char *path)
         struct dirent **entries;
         int n, ret;
 
+        assert(buf->data != path);
+
         /*
          * redirect if directory path doesn't end with /
          */
@@ -933,6 +936,8 @@ static int buildrespdirlist(HConnection *conn, const char *path, struct dirent *
         char mtime[DATEMAX];
         const char *title, *fname, *fmt;
         int i;
+
+        assert(buf->data != path);
 
         title = strcmp(path, "./") == 0 ? "" : path;
         hprintf(conn, "<!DOCTYPE html><meta charset=\"utf-8\"/><style>"
@@ -1236,8 +1241,10 @@ static const char *strstatus(int status)
         case 500: return "Internal Server Error";
         case 501: return "Not Implemented";
         case 505: return "HTTP Version Not Supported";
-        default:  return NULL;
         }
+
+        assert(0);      /* not reached */
+        return NULL;
 }
 
 static void logerror(const char *fmt, ...)
