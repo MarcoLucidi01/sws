@@ -1242,12 +1242,12 @@ static char *strtrim(char *s)
         size_t len;
         char *end;
 
-        for (; *s == ' ' || *s == '\t'; s++)
+        for (; isspace(*s); s++)
                 ;
 
         len = strlen(s);
         if (len > 0) {
-                for (end = s + len - 1; end > s && (*end == ' ' || *end == '\t'); end--)
+                for (end = s + len - 1; end > s && isspace(*end); end--)
                         ;
                 end[1] = '\0';
         }
