@@ -359,7 +359,7 @@ static void setupsock(const Args *args)
         if (err)
                 die("getaddrinfo: %s", gai_strerror(err));
 
-        for (p = info; p; p = p->ai_next) {
+        for (p = info; p != NULL; p = p->ai_next) {
                 server.sock = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
                 if (server.sock == -1)
                         continue;
@@ -484,7 +484,8 @@ static void run(void)
 
         server.running = 1;
         while (server.running) {
-                if ((client = accept(server.sock, NULL, NULL)) == -1) {
+                client = accept(server.sock, NULL, NULL);
+                if (client == -1) {
                         if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
                                 logerror("accept: %s", strerror(errno));
                         continue;
@@ -505,9 +506,9 @@ static void run(void)
 
 static void handlereq(int client)
 {
-        HConnection *conn;
+        HConnection *conn = hopen(client);
 
-        if ((conn = hopen(client)) == NULL) {
+        if (conn == NULL) {
                 logerror("cannot open http connection");
                 return;
         }
@@ -535,12 +536,26 @@ static HConnection *hopen(int client)
         socklen_t addrlen = sizeof(SockaddrStorage);
         int outfd = -1;
 
-        if (setsocktimeout(client, CONNTIMEOUT) == -1
-        || (conn = malloc(sizeof(*conn))) == NULL
-        || (conn->in = fdopen(client, "r")) == NULL
-        || getpeername(client, (struct sockaddr *)&conn->addr, &addrlen) == -1
-        || (outfd = dup(client)) == -1
-        || (conn->out = fdopen(outfd, "w")) == NULL)
+        if (setsocktimeout(client, CONNTIMEOUT) == -1)
+                goto error;
+
+        conn = malloc(sizeof(*conn));
+        if (conn == NULL)
+                goto error;
+
+        conn->in = fdopen(client, "r");
+        if (conn->in == NULL)
+                goto error;
+
+        if (getpeername(client, (struct sockaddr *)&conn->addr, &addrlen) == -1)
+                goto error;
+
+        outfd = dup(client);
+        if (outfd == -1)
+                goto error;
+
+        conn->out = fdopen(outfd, "w");
+        if (conn->out == NULL)
                 goto error;
 
         conn->reqsleft  = CONNMAXREQS;
@@ -570,7 +585,7 @@ static int setsocktimeout(int sock, time_t sec)
 {
         struct timeval timeout;
 
-        timeout.tv_sec = sec;
+        timeout.tv_sec  = sec;
         timeout.tv_usec = 0;
         if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == 0
         &&  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) == 0)
@@ -625,15 +640,20 @@ static int recvreq(HConnection *conn)
 
         conn->req.timestamp = time(NULL);
 
-        /*
-         * stop at first return value != 200
-         */
-        if (ret != 200
-        || (ret = parseuri(conn))     != 200
-        || (ret = parseversion(conn)) != 200
-        || (ret = parseheaders(conn)) != 200) {
-        }
+        if (ret != 200)
+                goto done;
 
+        ret = parseuri(conn);
+        if (ret != 200)
+                goto done;
+
+        ret = parseversion(conn);
+        if (ret != 200)
+                goto done;
+
+        ret = parseheaders(conn);
+
+done:
         conn->resp.status = ret;
         return ret;
 }
@@ -681,7 +701,8 @@ static int parseuri(HConnection *conn)
                 return 500;
 
         uridecode(buf->data);
-        if ((conn->req.uri = strdup(buf->data)) == NULL)
+        conn->req.uri = strdup(buf->data);
+        if (conn->req.uri == NULL)
                 return 500;
 
         return 200;
@@ -743,7 +764,8 @@ static int parseheaders(HConnection *conn)
                         return 500;
 
                 name = buf->data;
-                if ((value = strchr(name, ':')) == NULL)
+                value = strchr(name, ':');
+                if (value == NULL)
                         return 400;     /* malformed header */
 
                 *value++ = '\0';        /* null-terminate name string */
@@ -822,7 +844,7 @@ static int buildresp(HConnection *conn)
                 return buildresperror(conn, conn->resp.status);
 
         relpath = strtrim(conn->req.uri);
-        if (relpath[0] == '.' || strstr(relpath, "/."))
+        if (relpath[0] == '.' || strstr(relpath, "/.") != NULL)
                 return buildresperror(conn, 404);
 
         for (; *relpath == '/'; relpath++)
@@ -863,7 +885,8 @@ static int buildrespfile(HConnection *conn, const char *path, const struct stat 
                 return 304;
         }
 
-        if ((f = fopen(path, "r")) == NULL)
+        f = fopen(path, "r");
+        if (f == NULL)
                 return buildresperror(conn, 403);
 
         addheader(conn, "Accept-Ranges", "bytes");
@@ -912,7 +935,8 @@ static int buildrespdir(HConnection *conn, const char *path)
         /*
          * directory listing
          */
-        if ((n = scandir(path, &entries, scandirfilter, scandircmp)) == -1)
+        n = scandir(path, &entries, scandirfilter, scandircmp);
+        if (n == -1)
                 return buildresperror(conn, 404);
 
         ret = buildrespdirlist(conn, path, entries, n);
@@ -1177,8 +1201,12 @@ static const char *parsemimetype(const char *fname, FILE *f)
         size_t n, i;
 
         ext = strrchr(fname, '.');
-        if (ext && (m = bsearch(++ext, mimetypes, ARRAYLEN(mimetypes), sizeof(*mimetypes), mimetypecmp)))
-                return m->mime;
+        if (ext != NULL) {
+                ext++;
+                m = bsearch(ext, mimetypes, ARRAYLEN(mimetypes), sizeof(*mimetypes), mimetypecmp);
+                if (m != NULL)
+                        return m->mime;
+        }
 
         n = fread(buf, sizeof(*buf), sizeof(buf), f);
         rewind(f);
@@ -1222,8 +1250,7 @@ static char *strtrim(char *s)
 
         len = strlen(s);
         if (len > 0) {
-                end = s + len - 1;
-                for (; end > s && (*end == ' ' || *end == '\t'); end--)
+                for (end = s + len - 1; end > s && (*end == ' ' || *end == '\t'); end--)
                         ;
                 end[1] = '\0';
         }
@@ -1323,14 +1350,15 @@ static int bufvprintf(Buffer *buf, const char *fmt, va_list ap, va_list apcopy)
         if (bufavailable(buf) == 0 && bufreserve(buf, 1) == -1)
                 return -1;
 
-        if ((prilen = vsnprintf(buf->data + buf->len, bufavailable(buf), fmt, ap)) < 0)
+        prilen = vsnprintf(buf->data + buf->len, bufavailable(buf), fmt, ap);
+        if (prilen < 0)
                 return -1;
 
         if ((unsigned int)prilen >= bufavailable(buf)) {
                 if (bufreserve(buf, prilen + 1) == -1)
                         return -1;
-
-                if ((prilen = vsnprintf(buf->data + buf->len, bufavailable(buf), fmt, apcopy)) < 0)
+                prilen = vsnprintf(buf->data + buf->len, bufavailable(buf), fmt, apcopy);
+                if (prilen < 0)
                         return -1;
         }
 
@@ -1347,8 +1375,8 @@ static int bufreserve(Buffer *buf, size_t n)
                 return 0;
 
         newcap = buf->cap + MAX(BUFCHUNK, (n - bufavailable(buf)));
-
-        if ((p = realloc(buf->data, newcap)) == NULL)
+        p = realloc(buf->data, newcap);
+        if (p == NULL)
                 return -1;
 
         buf->cap = newcap;
