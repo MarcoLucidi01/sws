@@ -427,6 +427,11 @@ static void sighandler(int sig)
                 server.running = 0;
                 break;
         case SIGCHLD:
+                /*
+                 * SIGCHLD is raised when a child process exits. We take the
+                 * occasion to reap zombies left from closed connections without
+                 * blocking.
+                 */
                 while (waitpid(-1, NULL, WNOHANG) > 0)
                         ;
                 break;
