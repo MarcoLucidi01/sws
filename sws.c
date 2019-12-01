@@ -71,7 +71,6 @@
 #define ARRAYLEN(a)     (sizeof((a)) / sizeof((a)[0]))
 #define MAX(a, b)       ((a) > (b) ? (a) : (b))
 #define MIN(a, b)       ((a) < (b) ? (a) : (b))
-#define ISASCII(c)      ((c) > 0 && (c) < 128)
 
 typedef struct Buffer           Buffer;
 typedef struct Args             Args;
@@ -1208,7 +1207,7 @@ static const char *parsemimetype(const char *fname, FILE *f)
         n = fread(buf, sizeof(*buf), sizeof(buf), f);
         rewind(f);
         for (i = 0; i < n; i++)
-                if ( ! ISASCII(buf[i]))
+                if ( ! isprint(buf[i]) && ! isspace(buf[i]))
                         return "application/octet-stream";
 
         return "text/plain";
