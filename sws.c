@@ -1163,10 +1163,7 @@ static char *uriencode(const char *s, char *buf, size_t size)
         while (*s && i < size - 1) {
                 c = *s++;
 
-                if ((c >= 'A' && c <= 'Z')
-                ||  (c >= 'a' && c <= 'z')
-                ||  (c >= '0' && c <= '9')
-                ||  strchr(";,/?:@&=+$-_.!~*'()#", c))
+                if (isalnum(c) || strchr(";,/?:@&=+$-_.!~*'()#", c))
                         buf[i++] = c;
                 else {
                         buf[i++] = '%';
