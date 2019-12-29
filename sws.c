@@ -100,10 +100,10 @@ struct Args                             /* command line arguments */
 
 struct Server                           /* server runtime informations */
 {
-        int             sock;           /* server listening socket */
-        int             running;        /* 1 if running, 0 if stopped */
-        char           *rootpath;       /* current working directory absolute path */
-        const char     *index;          /* index filename for directories requests */
+        int                     sock;           /* server listening socket */
+        volatile sig_atomic_t   running;        /* 1 if running, 0 if stopped */
+        char                   *rootpath;       /* current working directory absolute path */
+        const char             *index;          /* index filename for directories requests */
 };
 
 struct HRange                           /* http range header first value */
