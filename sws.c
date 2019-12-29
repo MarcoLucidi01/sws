@@ -71,6 +71,7 @@
 #define ARRAYLEN(a)     (sizeof((a)) / sizeof((a)[0]))
 #define MAX(a, b)       ((a) > (b) ? (a) : (b))
 #define MIN(a, b)       ((a) < (b) ? (a) : (b))
+#define SAFEPRI(s)      ((s) != NULL ? (s) : "NULL")
 
 typedef struct Buffer           Buffer;
 typedef struct Args             Args;
@@ -331,6 +332,9 @@ static void parseargs(Args *args, int argc, char *const *argv)
                 case 'v':
                         args->version = 1;
                         break;
+                default:
+                        die(USAGE);
+                        break;
                 }
         }
 }
@@ -356,7 +360,7 @@ static void setupsock(const Args *args)
 
         err = getaddrinfo(args->address, args->port, &hints, &info);
         if (err)
-                die("getaddrinfo: %s", gai_strerror(err));
+                die("getaddrinfo(\"%s\", \"%s\"): %s", SAFEPRI(args->address), args->port, gai_strerror(err));
 
         for (p = info; p != NULL; p = p->ai_next) {
                 server.sock = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
@@ -381,7 +385,7 @@ static void setupsock(const Args *args)
         freeaddrinfo(info);
 
         if (p == NULL)
-                die("failed to bind socket");
+                die("failed to bind socket using address \"%s\" and port \"%s\"", SAFEPRI(args->address), args->port);
 }
 
 static void setuprootpath(const Args *args)
@@ -389,18 +393,18 @@ static void setuprootpath(const Args *args)
         Buffer buf;
 
         if (chdir(args->rootpath) != 0)
-                die("chdir: %s", strerror(errno));
+                die("chdir(\"%s\"): %s", args->rootpath, strerror(errno));
 
         bufinit(&buf);
         for (;;) {
                 if (bufreserve(&buf, buf.cap + BUFCHUNK) == -1)
-                        die("bufreserve: %s", strerror(errno));
+                        die("bufreserve(): %s", strerror(errno));
 
                 server.rootpath = buf.data;
                 if (getcwd(server.rootpath, buf.cap))
                         break;
                 if (errno != ERANGE)
-                        die("getcwd: %s", strerror(errno));
+                        die("getcwd(): %s", strerror(errno));
         }
 }
 
@@ -412,7 +416,7 @@ static void setupsighandlers(void)
 
         sa.sa_handler = stop;
         if (sigaction(SIGINT, &sa, NULL) == -1 || sigaction(SIGTERM, &sa, NULL) == -1)
-                die("sigaction: %s", strerror(errno));
+                die("sigaction(): %s", strerror(errno));
 
         /*
          * SIG_IGN SIGCHLD prevents zombies creation since POSIX.1 2001.
@@ -423,7 +427,7 @@ static void setupsighandlers(void)
          */
         sa.sa_handler = SIG_IGN;
         if (sigaction(SIGCHLD, &sa, NULL) == -1 || sigaction(SIGPIPE, &sa, NULL) == -1)
-                die("sigaction: %s", strerror(errno));
+                die("sigaction(): %s", strerror(errno));
 }
 
 static void stop(int sig)
@@ -441,7 +445,7 @@ static void logsrvinfo(void)
 
         memset(&ss, 0, sslen);
         if (getsockname(server.sock, (struct sockaddr *)&ss, &sslen) == -1)
-                die("getsockname: %s", strerror(errno));
+                die("getsockname(): %s", strerror(errno));
 
         ssinetntop(&ss, address, port);
 
@@ -475,7 +479,7 @@ static void run(void)
                 client = accept(server.sock, NULL, NULL);
                 if (client == -1) {
                         if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
-                                logerror("accept: %s", strerror(errno));
+                                logerror("accept(): %s", strerror(errno));
                         continue;
                 }
 
@@ -484,7 +488,7 @@ static void run(void)
                         handlereq(client);
                         return;
                 case -1:
-                        logerror("fork: %s", strerror(errno));
+                        logerror("fork(): %s", strerror(errno));
                         /* fallthrough */
                 default:
                         close(client);
