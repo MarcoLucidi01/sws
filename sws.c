@@ -39,7 +39,6 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -154,8 +153,8 @@ static void             parseargs(Args *, int, char *const *);
 static void             initsrv(const Args *);
 static void             setupsock(const Args *);
 static void             setuprootpath(const Args *);
-static void             setupsighandler(void);
-static void             sighandler(int);
+static void             setupsighandlers(void);
+static void             stop(int);
 static void             logsrvinfo(void);
 static void             ssinetntop(const SockaddrStorage *, char *, char *);
 static void             run(void);
@@ -340,7 +339,7 @@ static void initsrv(const Args *args)
         setvbuf(stdout, NULL, _IOLBF, 0);       /* line buffer even when stdout is not a terminal */
         setupsock(args);
         setuprootpath(args);
-        setupsighandler();
+        setupsighandlers();
         server.index = args->index;
 }
 
@@ -404,44 +403,33 @@ static void setuprootpath(const Args *args)
         }
 }
 
-static void setupsighandler(void)
+static void setupsighandlers(void)
 {
         struct sigaction sa;
 
         memset(&sa, 0, sizeof(sa));
-        sa.sa_handler = sighandler;
 
-        if (sigaction(SIGINT,  &sa, NULL) == -1
-        ||  sigaction(SIGTERM, &sa, NULL) == -1
-        ||  sigaction(SIGCHLD, &sa, NULL) == -1
-        ||  sigaction(SIGPIPE, &sa, NULL) == -1)
+        sa.sa_handler = stop;
+        if (sigaction(SIGINT, &sa, NULL) == -1 || sigaction(SIGTERM, &sa, NULL) == -1)
+                die("sigaction: %s", strerror(errno));
+
+        /*
+         * SIG_IGN SIGCHLD prevents zombies creation since POSIX.1 2001.
+         *
+         * SIGPIPE is raised when a client prematurely closes the connection.
+         * Default behavior is to terminate the process, so we ignore it to
+         * handle the error.
+         */
+        sa.sa_handler = SIG_IGN;
+        if (sigaction(SIGCHLD, &sa, NULL) == -1 || sigaction(SIGPIPE, &sa, NULL) == -1)
                 die("sigaction: %s", strerror(errno));
 }
 
-static void sighandler(int sig)
+static void stop(int sig)
 {
-        switch (sig) {
-        case SIGINT:
-        case SIGTERM:
-                server.running = 0;
-                break;
-        case SIGCHLD:
-                /*
-                 * SIGCHLD is raised when a child process exits. We take the
-                 * occasion to reap zombies left from closed connections without
-                 * blocking.
-                 */
-                while (waitpid(-1, NULL, WNOHANG) > 0)
-                        ;
-                break;
-        case SIGPIPE:
-                /*
-                 * SIGPIPE is raised when a client prematurely closes the
-                 * connection. The default behavior is to terminate the process,
-                 * so we ignore it!
-                 */
-                break;
-        }
+        (void)sig;
+
+        server.running = 0;
 }
 
 static void logsrvinfo(void)
