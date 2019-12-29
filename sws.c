@@ -65,6 +65,7 @@
 #define MAXHEADERS      100             /* max number of request headers allowed */
 #define HDATEFMT        "%a, %d %b %Y %H:%M:%S GMT"     /* http date format for strftime */
 #define DATEMAX         64              /* size for date buffers (both log and http) */
+#define INET6_PORTSTRLEN        6       /* like INET6_ADDRSTRLEN but for port */
 #define BUFCHUNK        256             /* minimum buffer capacity increment */
 
 #define ARRAYLEN(a)     (sizeof((a)) / sizeof((a)[0]))
@@ -436,7 +437,7 @@ static void logsrvinfo(void)
 {
         SockaddrStorage ss;
         socklen_t sslen = sizeof(ss);
-        char address[INET6_ADDRSTRLEN], port[6];
+        char address[INET6_ADDRSTRLEN], port[INET6_PORTSTRLEN];
 
         memset(&ss, 0, sslen);
         if (getsockname(server.sock, (struct sockaddr *)&ss, &sslen) == -1)
@@ -1208,7 +1209,7 @@ static int mimetypecmp(const void *ext, const void *mimetype)
 
 static void logconnection(const HConnection *conn)
 {
-        char address[INET6_ADDRSTRLEN], port[6], date[DATEMAX];
+        char address[INET6_ADDRSTRLEN], port[INET6_PORTSTRLEN], date[DATEMAX];
 
         address[0] = port[0] = date[0] = '\0';
         ssinetntop(&conn->addr, address, port);
