@@ -619,7 +619,7 @@ static void hclose(HConnection *conn)
 
 static int isalive(HConnection *conn)
 {
-        return ! feof(conn->in) && ! ferror(conn->in) && ! feof(conn->out) && ! ferror(conn->out);
+        return ! feof(conn->in) && ! ferror(conn->in) && ! ferror(conn->out);
 }
 
 static int recvreq(HConnection *conn)
